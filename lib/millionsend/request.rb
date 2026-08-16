@@ -37,8 +37,11 @@ module Millionsend
     def perform
       api_key = Millionsend.api_key
       if api_key.nil? || api_key.to_s.empty?
-        raise Millionsend::Error.new(
-          "Missing API key. Set Millionsend.api_key or the MILLIONSEND_API_KEY environment variable.", nil
+        # Client-side failure: same class and stable name as a transport error,
+        # so rescue Millionsend::ApplicationError / branching on e.name works.
+        raise Millionsend::ApplicationError.new(
+          "Missing API key. Set Millionsend.api_key or the MILLIONSEND_API_KEY environment variable.",
+          nil, "application_error"
         )
       end
 

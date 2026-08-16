@@ -130,11 +130,33 @@ RSpec.describe Millionsend do
       end
     end
 
-    it "raises when no API key is configured" do
+    it "raises ApplicationError with a stable name when no API key is configured" do
       Millionsend.api_key = nil
       with_env("MILLIONSEND_API_KEY" => nil) do
-        expect { Millionsend::Emails.get("e1") }.to raise_error(Millionsend::Error, /Missing API key/)
+        expect { Millionsend::Emails.get("e1") }
+          .to raise_error(Millionsend::ApplicationError, /Missing API key/) do |err|
+            expect(err.status_code).to be_nil
+            expect(err.name).to eq("application_error")
+          end
       end
+    end
+  end
+
+  describe "call shapes" do
+    it "accepts bare keywords, matching the README quickstart" do
+      stub_request(:post, "https://api.test/emails").to_return(ok)
+      Millionsend::Emails.send(from: "a@x.dev", to: "b@x.dev", subject: "s", html: "<p>h</p>")
+
+      expect(WebMock).to have_requested(:post, "https://api.test/emails").with(
+        body: { "from" => "a@x.dev", "to" => "b@x.dev", "subject" => "s", "html" => "<p>h</p>" }
+      )
+    end
+  end
+
+  describe Millionsend::Util do
+    it "path-encodes a segment per RFC 3986 (space is %20, never +)" do
+      expect(Millionsend::Util.encode("a b@x.dev")).to eq("a%20b%40x.dev")
+      expect(Millionsend::Util.encode("a+b@x.dev")).to eq("a%2Bb%40x.dev")
     end
   end
 end

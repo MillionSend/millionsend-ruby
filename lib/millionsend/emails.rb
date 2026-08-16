@@ -4,10 +4,13 @@ module Millionsend
   # Transactional email: send one, look it up, cancel a scheduled one.
   module Emails
     class << self
-      # POST /emails. Pass idempotency_key: to make a send safe to retry.
-      def send(params, idempotency_key: nil)
+      # POST /emails. Accepts a params hash or bare keywords
+      # (Emails.send(from: ..., to: ...)); a trailing options hash carries
+      # idempotency_key. No keyword parameters are declared on purpose — Ruby 3
+      # keyword separation would otherwise reject the bare-keyword call shape.
+      def send(params = {}, options = {})
         Millionsend::Request.new(
-          method: :post, path: "/emails", body: params, idempotency_key: idempotency_key
+          method: :post, path: "/emails", body: params, idempotency_key: options[:idempotency_key]
         ).perform
       end
       alias_method :create, :send

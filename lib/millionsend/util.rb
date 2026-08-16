@@ -8,9 +8,12 @@ module Millionsend
     module_function
 
     # Percent-encode a single URL path segment (contact ids and emails, which
-    # can contain "@" and "+").
+    # can contain "@" and "+"). encode_www_form_component is form encoding, so
+    # it maps space to "+" — wrong inside a path segment, where servers decode
+    # "+" literally. It already turned real plus signs into %2B, so every
+    # remaining "+" is a space and can safely become %20.
     def encode(value)
-      URI.encode_www_form_component(value.to_s)
+      URI.encode_www_form_component(value.to_s).gsub("+", "%20")
     end
 
     # The keyset pagination params every list endpoint accepts. nil values are
