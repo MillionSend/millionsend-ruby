@@ -1,12 +1,29 @@
-Gem::Specification.new do |s|
-  s.name        = "millionsend"
-  s.version     = "0.0.1"
-  s.summary     = "Official Ruby SDK for MillionSend — the open-source email platform. Under active development."
-  s.description = "Official Ruby SDK for MillionSend, the open-source, self-hostable email platform. This placeholder release reserves the gem name; follow https://github.com/MillionSend for the first working release."
-  s.authors     = ["MillionSend"]
-  s.homepage    = "https://github.com/MillionSend/millionsend-ruby"
-  s.license     = "MIT"
-  s.files       = ["lib/millionsend.rb", "README.md", "LICENSE"]
-  s.required_ruby_version = ">= 3.0"
-  s.metadata    = { "source_code_uri" => "https://github.com/MillionSend/millionsend-ruby" }
+# frozen_string_literal: true
+
+require_relative "lib/millionsend/version"
+
+Gem::Specification.new do |spec|
+  spec.name        = "millionsend"
+  spec.version     = Millionsend::VERSION
+  spec.summary     = "Official Ruby SDK for MillionSend — a self-hostable, Resend-compatible email API."
+  spec.description = "Ruby client for the MillionSend HTTP API: emails, batch, audiences, " \
+                     "contacts, topics, broadcasts, and dynamic segments. Wire-compatible with " \
+                     "Resend and mirror-shaped after resend-ruby, so migrating is mostly an " \
+                     "import swap plus a base_url."
+  spec.authors     = ["MillionSend"]
+  spec.homepage    = "https://github.com/MillionSend/millionsend-ruby"
+  spec.license     = "MIT"
+  spec.required_ruby_version = ">= 3.0"
+
+  spec.files         = Dir["lib/**/*.rb"] + ["README.md", "LICENSE"]
+  spec.require_paths = ["lib"]
+
+  spec.metadata = {
+    "source_code_uri"       => "https://github.com/MillionSend/millionsend-ruby",
+    "rubygems_mfa_required" => "true",
+  }
+
+  spec.add_development_dependency "rake", "~> 13.0"
+  spec.add_development_dependency "rspec", "~> 3.12"
+  spec.add_development_dependency "webmock", "~> 3.19"
 end

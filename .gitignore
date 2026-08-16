@@ -1,6 +1,8 @@
-.DS_Store
-vendor/
-target/
+/.bundle/
+/vendor/bundle/
+/pkg/
+/tmp/
+/coverage/
 *.gem
 Gemfile.lock
-Cargo.lock
+.rspec_status
