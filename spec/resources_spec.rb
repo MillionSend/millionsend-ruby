@@ -46,39 +46,15 @@ RSpec.describe "resource wiring" do
     end
   end
 
-  describe Millionsend::Audiences do
-    it "covers create/get/list/remove" do
-      stub_request(:post, "https://api.test/audiences").to_return(ok)
-      Millionsend::Audiences.create({ name: "Users" })
-      expect(WebMock).to have_requested(:post, "https://api.test/audiences").with(body: { "name" => "Users" })
-
-      stub_request(:get, "https://api.test/audiences/a1").to_return(ok)
-      Millionsend::Audiences.get("a1")
-      expect(WebMock).to have_requested(:get, "https://api.test/audiences/a1")
-
-      stub_request(:get, "https://api.test/audiences").with(query: { "limit" => "10" }).to_return(list_ok)
-      Millionsend::Audiences.list(limit: 10)
-      expect(WebMock).to have_requested(:get, "https://api.test/audiences").with(query: { "limit" => "10" })
-
-      stub_request(:delete, "https://api.test/audiences/a1").to_return(ok)
-      Millionsend::Audiences.remove("a1")
-      expect(WebMock).to have_requested(:delete, "https://api.test/audiences/a1")
-    end
-  end
-
   describe Millionsend::Contacts do
-    it "creates audience-scoped and top-level, stripping audience_id from the body" do
-      stub_request(:post, "https://api.test/audiences/a1/contacts").to_return(ok)
-      Millionsend::Contacts.create({ audience_id: "a1", email: "c@x.dev", first_name: "Ada" })
-      expect(WebMock).to have_requested(:post, "https://api.test/audiences/a1/contacts")
-        .with(body: { "email" => "c@x.dev", "first_name" => "Ada" })
-
+    it "create posts to /contacts" do
       stub_request(:post, "https://api.test/contacts").to_return(ok)
-      Millionsend::Contacts.create({ email: "c@x.dev" })
-      expect(WebMock).to have_requested(:post, "https://api.test/contacts").with(body: { "email" => "c@x.dev" })
+      Millionsend::Contacts.create({ email: "c@x.dev", first_name: "Ada" })
+      expect(WebMock).to have_requested(:post, "https://api.test/contacts")
+        .with(body: { "email" => "c@x.dev", "first_name" => "Ada" })
     end
 
-    it "addresses by id, by email, and audience-scoped" do
+    it "addresses by id and by email" do
       stub_request(:get, "https://api.test/contacts/c1").to_return(ok)
       Millionsend::Contacts.get("c1")
       expect(WebMock).to have_requested(:get, "https://api.test/contacts/c1")
@@ -86,10 +62,6 @@ RSpec.describe "resource wiring" do
       stub_request(:get, "https://api.test/contacts/c%40x.dev").to_return(ok)
       Millionsend::Contacts.get("c@x.dev")
       expect(WebMock).to have_requested(:get, "https://api.test/contacts/c%40x.dev")
-
-      stub_request(:get, "https://api.test/audiences/a1/contacts/c1").to_return(ok)
-      Millionsend::Contacts.get("c1", audience_id: "a1")
-      expect(WebMock).to have_requested(:get, "https://api.test/audiences/a1/contacts/c1")
     end
 
     it "update sends only body fields; email wins for addressing and nil clears" do
@@ -104,9 +76,9 @@ RSpec.describe "resource wiring" do
       Millionsend::Contacts.remove("c@x.dev")
       expect(WebMock).to have_requested(:delete, "https://api.test/contacts/c%40x.dev")
 
-      stub_request(:get, "https://api.test/audiences/a1/contacts").with(query: { "after" => "cur" }).to_return(list_ok)
-      Millionsend::Contacts.list(audience_id: "a1", after: "cur")
-      expect(WebMock).to have_requested(:get, "https://api.test/audiences/a1/contacts").with(query: { "after" => "cur" })
+      stub_request(:get, "https://api.test/contacts").with(query: { "after" => "cur" }).to_return(list_ok)
+      Millionsend::Contacts.list(after: "cur")
+      expect(WebMock).to have_requested(:get, "https://api.test/contacts").with(query: { "after" => "cur" })
     end
 
     it "topics_update patches /contacts/:id/topics with a bare array" do
@@ -141,9 +113,9 @@ RSpec.describe "resource wiring" do
   describe Millionsend::Broadcasts do
     it "covers the full lifecycle" do
       stub_request(:post, "https://api.test/broadcasts").to_return(ok)
-      Millionsend::Broadcasts.create({ audience_id: "a1", from: "a@x.dev", subject: "News", html: "<p>hi</p>" })
+      Millionsend::Broadcasts.create({ segment_id: "s1", from: "a@x.dev", subject: "News", html: "<p>hi</p>" })
       expect(WebMock).to have_requested(:post, "https://api.test/broadcasts")
-        .with(body: { "audience_id" => "a1", "from" => "a@x.dev", "subject" => "News", "html" => "<p>hi</p>" })
+        .with(body: { "segment_id" => "s1", "from" => "a@x.dev", "subject" => "News", "html" => "<p>hi</p>" })
 
       stub_request(:get, "https://api.test/broadcasts/b1").to_return(ok)
       Millionsend::Broadcasts.get("b1")
@@ -173,33 +145,33 @@ RSpec.describe "resource wiring" do
   end
 
   describe Millionsend::Segments do
-    it "covers create/get/list/update/remove on /segments2" do
-      filter = { match: "all", conditions: [{ field: "email", op: "is_set" }] }
+    it "covers create/get/list/update/remove on /segments" do
+      filter = { match: "all", conditions: [{ field: "email", op: "is_set", value: nil }] }
 
-      stub_request(:post, "https://api.test/segments2").to_return(ok)
-      Millionsend::Segments.create({ name: "Active", audience_id: "a1", filter: filter })
-      expect(WebMock).to have_requested(:post, "https://api.test/segments2").with(
+      stub_request(:post, "https://api.test/segments").to_return(ok)
+      Millionsend::Segments.create({ name: "Active", filter: filter })
+      expect(WebMock).to have_requested(:post, "https://api.test/segments").with(
         body: {
-          "name" => "Active", "audience_id" => "a1",
-          "filter" => { "match" => "all", "conditions" => [{ "field" => "email", "op" => "is_set" }] }
+          "name" => "Active",
+          "filter" => { "match" => "all", "conditions" => [{ "field" => "email", "op" => "is_set", "value" => nil }] }
         }
       )
 
-      stub_request(:get, "https://api.test/segments2/s1").to_return(ok)
+      stub_request(:get, "https://api.test/segments/s1").to_return(ok)
       Millionsend::Segments.get("s1")
-      expect(WebMock).to have_requested(:get, "https://api.test/segments2/s1")
+      expect(WebMock).to have_requested(:get, "https://api.test/segments/s1")
 
-      stub_request(:get, "https://api.test/segments2").with(query: { "before" => "cur" }).to_return(list_ok)
+      stub_request(:get, "https://api.test/segments").with(query: { "before" => "cur" }).to_return(list_ok)
       Millionsend::Segments.list(before: "cur")
-      expect(WebMock).to have_requested(:get, "https://api.test/segments2").with(query: { "before" => "cur" })
+      expect(WebMock).to have_requested(:get, "https://api.test/segments").with(query: { "before" => "cur" })
 
-      stub_request(:patch, "https://api.test/segments2/s1").to_return(ok)
+      stub_request(:patch, "https://api.test/segments/s1").to_return(ok)
       Millionsend::Segments.update("s1", { name: "Renamed" })
-      expect(WebMock).to have_requested(:patch, "https://api.test/segments2/s1").with(body: { "name" => "Renamed" })
+      expect(WebMock).to have_requested(:patch, "https://api.test/segments/s1").with(body: { "name" => "Renamed" })
 
-      stub_request(:delete, "https://api.test/segments2/s1").to_return(ok)
+      stub_request(:delete, "https://api.test/segments/s1").to_return(ok)
       Millionsend::Segments.remove("s1")
-      expect(WebMock).to have_requested(:delete, "https://api.test/segments2/s1")
+      expect(WebMock).to have_requested(:delete, "https://api.test/segments/s1")
     end
   end
 end

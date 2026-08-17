@@ -1,35 +1,35 @@
 # frozen_string_literal: true
 
 module Millionsend
-  # Dynamic segments — a saved filter over an audience's contacts. A MillionSend
-  # extension with no Resend equivalent; served under /segments2.
+  # Dynamic segments — a saved filter over the team's contacts. A MillionSend
+  # extension with no Resend equivalent.
   module Segments
     class << self
-      # POST /segments2
+      # POST /segments
       def create(params)
-        Millionsend::Request.new(method: :post, path: "/segments2", body: params).perform
+        Millionsend::Request.new(method: :post, path: "/segments", body: params).perform
       end
 
-      # GET /segments2/:id — also returns a live contact_count.
+      # GET /segments/:id — also returns a live contact_count.
       def get(id)
-        Millionsend::Request.new(method: :get, path: "/segments2/#{Millionsend::Util.encode(id)}").perform
+        Millionsend::Request.new(method: :get, path: "/segments/#{Millionsend::Util.encode(id)}").perform
       end
 
-      # GET /segments2 — accepts limit:/after:/before:.
+      # GET /segments — accepts limit:/after:/before:.
       def list(options = {})
         Millionsend::Request.new(
-          method: :get, path: "/segments2", query: Millionsend::Util.list_query(options)
+          method: :get, path: "/segments", query: Millionsend::Util.list_query(options)
         ).perform
       end
 
-      # PATCH /segments2/:id
+      # PATCH /segments/:id
       def update(id, params)
-        Millionsend::Request.new(method: :patch, path: "/segments2/#{Millionsend::Util.encode(id)}", body: params).perform
+        Millionsend::Request.new(method: :patch, path: "/segments/#{Millionsend::Util.encode(id)}", body: params).perform
       end
 
-      # DELETE /segments2/:id
+      # DELETE /segments/:id
       def remove(id)
-        Millionsend::Request.new(method: :delete, path: "/segments2/#{Millionsend::Util.encode(id)}").perform
+        Millionsend::Request.new(method: :delete, path: "/segments/#{Millionsend::Util.encode(id)}").perform
       end
     end
   end

@@ -53,7 +53,7 @@ Millionsend.base_url = "https://mail.acme.dev" # falls back to ENV["MILLIONSEND_
 MillionSend is self-hosted, so there is no cloud default — **set `base_url` to your
 deployment in production.** An explicitly assigned value always wins over the environment.
 Params are symbol-keyed hashes and map straight to the wire (Ruby's snake_case is already
-the wire's snake_case: `reply_to`, `scheduled_at`, `audience_id`).
+the wire's snake_case: `reply_to`, `scheduled_at`, `segment_id`).
 
 ## Resources
 
@@ -70,28 +70,25 @@ Millionsend::Batch.send([payload_a, payload_b], idempotency_key: "run-7") # up t
 `to`, `cc`, `bcc` and `reply_to` accept either a string or an array. `Emails.create` is
 an alias of `Emails.send` (as is `Batch.create`), mirroring Resend.
 
-### Audiences & contacts
+### Contacts
+
+Contacts are team-global — one list per team, no audiences.
 
 ```ruby
-audience = Millionsend::Audiences.create(name: "Registered users")
-Millionsend::Audiences.list(limit: 20, after: cursor)
-Millionsend::Audiences.get(id)
-Millionsend::Audiences.remove(id)
-
-Millionsend::Contacts.create(audience_id: audience[:id], email: "ada@acme.dev",
-                             first_name: "Ada", properties: { plan: "pro" })
-Millionsend::Contacts.get("ada@acme.dev", audience_id: audience[:id]) # by id or email
-Millionsend::Contacts.get(contact_id)                                  # top-level, by id
-Millionsend::Contacts.update(id: contact_id, unsubscribed: true, first_name: nil) # nil clears
-Millionsend::Contacts.remove("ada@acme.dev", audience_id: audience[:id])
-Millionsend::Contacts.list(audience_id: audience[:id], limit: 50)
+contact = Millionsend::Contacts.create(email: "ada@acme.dev", first_name: "Ada",
+                                       properties: { plan: "pro" })
+Millionsend::Contacts.get("ada@acme.dev") # by id or email
+Millionsend::Contacts.update(id: contact[:id], unsubscribed: true, first_name: nil) # nil clears
+Millionsend::Contacts.remove("ada@acme.dev")
+Millionsend::Contacts.list(limit: 50)
 
 # Topic subscriptions (granular unsubscribe) — mirrors resend's contacts.topics.update
 Millionsend::Contacts.topics_update("ada@acme.dev", [{ id: topic_id, subscription: "opt_out" }])
 ```
 
 Contacts are addressable by id or email; when an `update` hash carries both, the email wins.
-Omit `audience_id:` to use the top-level `/contacts` endpoints.
+Emails are unique per team (case-insensitive) — a duplicate `create` raises
+`Millionsend::ValidationError`.
 
 ### Topics
 
@@ -106,7 +103,7 @@ Millionsend::Topics.remove(id)
 
 ```ruby
 broadcast = Millionsend::Broadcasts.create(
-  audience_id: audience[:id],
+  segment_id: segment[:id], # optional; omit segment_id and topic_id to send to all contacts
   from: "Acme <news@acme.dev>",
   subject: "Launch",
   html: "<p>Hi {{{FIRST_NAME|there}}}</p>"
@@ -121,13 +118,12 @@ Millionsend::Broadcasts.remove(broadcast[:id]) # draft only
 
 ### Segments (MillionSend extension)
 
-Dynamic segments are a saved filter over an audience's contacts — a MillionSend superset with
-no Resend equivalent, served under `/segments2`.
+Dynamic segments are a saved filter over the team's contacts — a MillionSend superset with
+no Resend equivalent.
 
 ```ruby
 segment = Millionsend::Segments.create(
   name: "Pro plan",
-  audience_id: audience[:id],
   filter: { match: "all", conditions: [{ field: "property:plan", op: "equals", value: "pro" }] }
 )
 Millionsend::Segments.get(segment[:id]) # includes a live contact_count
@@ -174,8 +170,9 @@ Method names, nesting and payloads match. Notes:
   are no `Domains` / `ApiKeys` resources here.
 - Resend's `Contacts.topics.update` becomes `Millionsend::Contacts.topics_update` (Ruby has no
   nested-module method on a module function).
-- `Millionsend::Segments` is the distinct dynamic-filter feature (`/segments2`), not Resend's
-  audiences alias. Use `Millionsend::Audiences` for a straight port.
+- **No audiences** — contacts are team-global, so there is no `Audiences` resource and no
+  `audience_id` params. `Millionsend::Segments` is the dynamic-filter feature (`/segments`),
+  not Resend's audiences alias.
 
 ## License
 

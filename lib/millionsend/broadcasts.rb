@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 module Millionsend
-  # Broadcasts — one email sent to a whole audience or segment.
+  # Broadcasts — one email sent to a segment, a topic's subscribers, or every
+  # contact (pass neither segment_id nor topic_id).
   module Broadcasts
     class << self
       # POST /broadcasts
