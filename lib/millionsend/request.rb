@@ -65,6 +65,13 @@ module Millionsend
     def build_uri
       base = Millionsend.base_url.to_s.sub(%r{/+\z}, "")
       uri = URI.parse("#{base}#{@path}")
+      if !Millionsend.allow_insecure_http && Millionsend::Util.insecure_http?(uri)
+        raise Millionsend::ApplicationError.new(
+          "Refusing to send the API key over plain http to #{base}. " \
+          "Use https, or set Millionsend.allow_insecure_http = true.",
+          nil, "application_error"
+        )
+      end
       query = (@query || {}).reject { |_, v| v.nil? }
       uri.query = URI.encode_www_form(query) unless query.empty?
       uri

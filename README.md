@@ -48,10 +48,15 @@ on any non-2xx response (see [Error handling](#error-handling)).
 Millionsend.api_key  = "ms_123"                # falls back to ENV["MILLIONSEND_API_KEY"]
 Millionsend.base_url = "https://mail.acme.dev" # falls back to ENV["MILLIONSEND_BASE_URL"],
                                                # then http://localhost:3001
+Millionsend.allow_insecure_http = false        # accept a non-loopback http:// base_url
 ```
 
 MillionSend is self-hosted, so there is no cloud default — **set `base_url` to your
 deployment in production.** An explicitly assigned value always wins over the environment.
+Plain `http://` is only accepted for loopback hosts (`localhost`, `127.0.0.1`, `::1`); any
+other `http://` URL raises `Millionsend::ApplicationError` on the first call, since the API
+key is sent as a bearer header. Set `allow_insecure_http = true` to talk to a non-TLS
+instance elsewhere (e.g. inside a private network).
 Params are symbol-keyed hashes and map straight to the wire (Ruby's snake_case is already
 the wire's snake_case: `reply_to`, `scheduled_at`, `segment_id`).
 

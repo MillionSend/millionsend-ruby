@@ -21,14 +21,17 @@ require "millionsend/segments"
 #
 # api_key falls back to the MILLIONSEND_API_KEY env var; base_url to
 # MILLIONSEND_BASE_URL and then http://localhost:3001 (MillionSend is
-# self-hosted, so there is no cloud default). Every call returns a symbol-keyed
-# Hash on success and raises a Millionsend::Error on any non-2xx response.
+# self-hosted, so there is no cloud default). Plain http is only accepted for
+# loopback hosts unless allow_insecure_http is set, since the API key travels
+# as a bearer header. Every call returns a symbol-keyed Hash on success and
+# raises a Millionsend::Error on any non-2xx response.
 module Millionsend
   DEFAULT_BASE_URL = "http://localhost:3001"
   USER_AGENT = "millionsend-ruby/#{VERSION}"
 
   class << self
     attr_writer :api_key, :base_url
+    attr_accessor :allow_insecure_http
 
     def api_key
       @api_key || ENV["MILLIONSEND_API_KEY"]

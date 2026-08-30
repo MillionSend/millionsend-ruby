@@ -16,6 +16,16 @@ module Millionsend
       URI.encode_www_form_component(value.to_s).gsub("+", "%20")
     end
 
+    LOOPBACK_HOSTS = %w[localhost 127.0.0.1 ::1].freeze
+
+    # True for an http:// URI whose host is not loopback.
+    def insecure_http?(uri)
+      return false unless uri.scheme == "http"
+
+      host = uri.host.to_s.downcase
+      !LOOPBACK_HOSTS.include?(host) && !host.start_with?("127.")
+    end
+
     # The keyset pagination params every list endpoint accepts. nil values are
     # dropped when the query string is built.
     def list_query(options)

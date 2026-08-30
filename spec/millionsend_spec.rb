@@ -70,6 +70,34 @@ RSpec.describe Millionsend do
         .with { |req| !req.headers.key?("Idempotency-Key") })
     end
 
+    it "refuses a non-loopback http base_url unless allow_insecure_http is set" do
+      Millionsend.base_url = "http://mail.example.com"
+      expect { Millionsend::Emails.get("e1") }
+        .to raise_error(Millionsend::ApplicationError, /allow_insecure_http/)
+
+      Millionsend.base_url = nil
+      with_env("MILLIONSEND_BASE_URL" => "http://mail.example.com") do
+        expect { Millionsend::Emails.get("e1") }
+          .to raise_error(Millionsend::ApplicationError, /allow_insecure_http/)
+      end
+
+      Millionsend.base_url = "http://mail.example.com"
+      Millionsend.allow_insecure_http = true
+      stub_request(:get, "http://mail.example.com/emails/e1").to_return(ok)
+      Millionsend::Emails.get("e1")
+      expect(WebMock).to have_requested(:get, "http://mail.example.com/emails/e1")
+    ensure
+      Millionsend.allow_insecure_http = false
+    end
+
+    it "always accepts loopback http" do
+      %w[http://localhost:3001 http://127.0.0.1:3001].each do |base|
+        Millionsend.base_url = base
+        stub_request(:get, "#{base}/emails/e1").to_return(ok)
+        expect { Millionsend::Emails.get("e1") }.not_to raise_error
+      end
+    end
+
     it "strips a trailing slash from base_url" do
       Millionsend.base_url = "https://api.test/"
       stub_request(:get, "https://api.test/emails/e1").to_return(ok)
