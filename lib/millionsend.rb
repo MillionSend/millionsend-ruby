@@ -10,6 +10,7 @@ require "millionsend/contacts"
 require "millionsend/topics"
 require "millionsend/broadcasts"
 require "millionsend/segments"
+require "millionsend/deliverability"
 
 # Ruby client for the MillionSend HTTP API. Configure once, then call the
 # resource modules:

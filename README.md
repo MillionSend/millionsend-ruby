@@ -66,7 +66,8 @@ the wire's snake_case: `reply_to`, `scheduled_at`, `segment_id`).
 
 ```ruby
 Millionsend::Emails.send(payload, idempotency_key: "order-42") # POST /emails
-Millionsend::Emails.get(id)                                    # GET  /emails/:id
+Millionsend::Emails.get(id)                                    # GET  /emails/:id (includes score: 0-10 or nil)
+Millionsend::Emails.get_insights(id)                           # GET  /emails/:id/insights (404 until computed)
 Millionsend::Emails.cancel(id)                                 # POST /emails/:id/cancel (scheduled only)
 
 Millionsend::Batch.send([payload_a, payload_b], idempotency_key: "run-7") # up to 100
@@ -136,6 +137,19 @@ Millionsend::Segments.list
 Millionsend::Segments.update(segment[:id], name: "Pro tier")
 Millionsend::Segments.remove(segment[:id])
 ```
+
+### Deliverability (MillionSend extension)
+
+Per-email best-practice insights and the account-level deliverability score.
+
+```ruby
+insights = Millionsend::Emails.get_insights(email[:id]) # score, band, checks: [{id:, severity:, status:, penalty:, detail:}]
+account  = Millionsend::Deliverability.get              # GET /deliverability — trailing-30-day account score
+puts account[:score] # 0-10 (one decimal) or nil when there is not enough data
+```
+
+Check ids and the band/severity/status values are an open set that grows across score
+versions — treat them as strings, not a closed enum.
 
 ## Error handling
 

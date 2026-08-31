@@ -17,6 +17,62 @@ RSpec.describe "resource wiring" do
       expect(WebMock).to have_requested(:get, "https://api.test/emails/e1")
     end
 
+    it "get returns score when present and null when the email has no insights" do
+      stub_request(:get, "https://api.test/emails/e1").to_return(ok('{"object":"email","id":"e1","score":8.5}'))
+      expect(Millionsend::Emails.get("e1")[:score]).to eq(8.5)
+
+      stub_request(:get, "https://api.test/emails/e2").to_return(ok('{"object":"email","id":"e2","score":null}'))
+      expect(Millionsend::Emails.get("e2")[:score]).to be_nil
+    end
+
+    it "get_insights hits GET /emails/:id/insights and returns the full report" do
+      body = {
+        object: "email_insights",
+        email_id: "9f3a2b1c-0000-0000-0000-000000000001",
+        score: 8.5,
+        score_version: 1,
+        band: "excellent",
+        marketing: true,
+        html_size_bytes: 12_345,
+        computed_at: "2026-08-31T12:00:00.000Z",
+        checks: [
+          { id: "list_unsubscribe", severity: "critical", status: "fail", penalty: 1.25,
+            detail: { header: "missing", docs: "https://x.test" } },
+          { id: "plain_text_part", severity: "minor", status: "pass", penalty: 0 },
+        ],
+      }
+      stub_request(:get, "https://api.test/emails/e1/insights").to_return(ok(JSON.generate(body)))
+
+      res = Millionsend::Emails.get_insights("e1")
+      expect(WebMock).to have_requested(:get, "https://api.test/emails/e1/insights")
+      expect(res).to eq(body)
+      expect(res[:checks][0][:detail]).to eq({ header: "missing", docs: "https://x.test" })
+      expect(res[:checks][1]).not_to have_key(:detail)
+    end
+
+    it "get_insights tolerates unknown future band/severity/status values" do
+      stub_request(:get, "https://api.test/emails/e1/insights").to_return(ok(
+        '{"object":"email_insights","email_id":"e1","score":5.0,"score_version":9,"band":"stellar",' \
+        '"marketing":false,"html_size_bytes":null,"computed_at":"2026-08-31T12:00:00.000Z",' \
+        '"checks":[{"id":"brand_new_check","severity":"cosmic","status":"deferred","penalty":0}]}'
+      ))
+
+      res = Millionsend::Emails.get_insights("e1")
+      expect(res[:band]).to eq("stellar")
+      expect(res[:checks][0][:status]).to eq("deferred")
+      expect(res[:html_size_bytes]).to be_nil
+    end
+
+    it "get_insights raises NotFoundError when insights are not available" do
+      stub_request(:get, "https://api.test/emails/e1/insights").to_return(
+        status: 404,
+        body: '{"statusCode":404,"name":"not_found","message":"Insights not available"}',
+        headers: { "Content-Type" => "application/json" }
+      )
+
+      expect { Millionsend::Emails.get_insights("e1") }.to raise_error(Millionsend::NotFoundError)
+    end
+
     it "cancel hits POST /emails/:id/cancel" do
       stub_request(:post, "https://api.test/emails/e1/cancel").to_return(ok)
       Millionsend::Emails.cancel("e1")
@@ -141,6 +197,37 @@ RSpec.describe "resource wiring" do
       stub_request(:delete, "https://api.test/broadcasts/b1").to_return(ok)
       Millionsend::Broadcasts.remove("b1")
       expect(WebMock).to have_requested(:delete, "https://api.test/broadcasts/b1")
+    end
+  end
+
+  describe Millionsend::Deliverability do
+    it "get hits GET /deliverability and returns the account score" do
+      body = {
+        object: "deliverability",
+        score: 8.7, band: "good",
+        content_score: 8.2, outcome_score: 9.1,
+        complaint_rate: 0.0002, hard_bounce_rate: 0.001,
+        emails_sent: 12_345, scored_recipients: 23_456,
+        window_days: 30, insufficient_outcome_data: false,
+        guardrail_status: "ok", score_version: 1,
+      }
+      stub_request(:get, "https://api.test/deliverability").to_return(ok(JSON.generate(body)))
+
+      expect(Millionsend::Deliverability.get).to eq(body)
+      expect(WebMock).to have_requested(:get, "https://api.test/deliverability")
+    end
+
+    it "get keeps null scores nil when there is not enough data" do
+      stub_request(:get, "https://api.test/deliverability").to_return(ok(
+        '{"object":"deliverability","score":null,"band":null,"content_score":null,"outcome_score":null,' \
+        '"complaint_rate":0,"hard_bounce_rate":0,"emails_sent":0,"scored_recipients":0,"window_days":30,' \
+        '"insufficient_outcome_data":true,"guardrail_status":"ok","score_version":1}'
+      ))
+
+      res = Millionsend::Deliverability.get
+      expect(res[:score]).to be_nil
+      expect(res[:band]).to be_nil
+      expect(res[:insufficient_outcome_data]).to be(true)
     end
   end
 
