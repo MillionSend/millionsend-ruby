@@ -15,17 +15,19 @@ RSpec.describe Millionsend do
       end
     end
 
-    it "defaults base_url to http://localhost:3001 when unset" do
+    it "defaults base_url to MillionSend Cloud when unset" do
       Millionsend.base_url = nil
       with_env("MILLIONSEND_BASE_URL" => nil) do
-        expect(Millionsend.base_url).to eq("http://localhost:3001")
+        expect(Millionsend.base_url).to eq("https://api.millionsend.com")
       end
     end
 
     it "prefers an explicitly set value over the environment" do
-      with_env("MILLIONSEND_API_KEY" => "ms_env") do
+      with_env("MILLIONSEND_API_KEY" => "ms_env", "MILLIONSEND_BASE_URL" => "https://env.test") do
         Millionsend.api_key = "ms_explicit"
+        Millionsend.base_url = "https://explicit.test"
         expect(Millionsend.api_key).to eq("ms_explicit")
+        expect(Millionsend.base_url).to eq("https://explicit.test")
       end
     end
   end
@@ -161,6 +163,7 @@ RSpec.describe Millionsend do
         "invalid_idempotent_request" => Millionsend::InvalidIdempotentRequestError,
         "concurrent_idempotent_requests" => Millionsend::ConcurrentIdempotentRequestsError,
         "internal_server_error" => Millionsend::InternalServerError,
+        "all_recipients_suppressed" => Millionsend::AllRecipientsSuppressedError,
         "unknown_future_name" => Millionsend::ApplicationError,
       }.each do |name, klass|
         err = Millionsend::Error.from_response(400, { statusCode: 400, name: name, message: "m" })

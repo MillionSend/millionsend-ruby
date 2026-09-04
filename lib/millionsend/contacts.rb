@@ -53,6 +53,14 @@ module Millionsend
     # Topic subscriptions of one contact, in resend-ruby's nested shape.
     module Topics
       class << self
+        # GET /contacts/:id_or_email/topics — { id: | email: } or a bare id/email.
+        # Every topic comes back with the contact's effective subscription;
+        # explicit: false means it is the topic's default, not a stored choice.
+        # Unpaginated, like Topics.list.
+        def list(params)
+          Millionsend::Request.new(method: :get, path: "#{Millionsend::Contacts.member_path(params)}/topics").perform
+        end
+
         # PATCH /contacts/:id_or_email/topics — { id: | email:, topics: [{ id:, subscription: }] }.
         def update(params)
           Millionsend::Contacts.topics_update(params, params[:topics])

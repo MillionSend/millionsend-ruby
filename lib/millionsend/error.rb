@@ -31,6 +31,7 @@ module Millionsend
   end
 
   class ValidationError < Error; end
+  class AllRecipientsSuppressedError < Error; end
   class NotFoundError < Error; end
   class MissingApiKeyError < Error; end
   class InvalidApiKeyError < Error; end
@@ -46,6 +47,7 @@ module Millionsend
 
   ERROR_TYPES = {
     "validation_error" => ValidationError,
+    "all_recipients_suppressed" => AllRecipientsSuppressedError,
     "not_found" => NotFoundError,
     "missing_api_key" => MissingApiKeyError,
     "invalid_api_key" => InvalidApiKeyError,

@@ -234,6 +234,23 @@ RSpec.describe "resource wiring" do
         .with(body: [{ "id" => "t1", "subscription" => "opt_out" }])
     end
 
+    it "Topics.list hits GET /contacts/:id_or_email/topics with the email encoded and decodes the shape" do
+      body = '{"object":"list","has_more":false,"data":[{"id":"9f3a2b1c-0000-0000-0000-000000000002",' \
+             '"name":"Insights","description":null,"subscription":"opt_in","explicit":false}]}'
+      stub_request(:get, "https://api.test/contacts/c%2Bnews%40x.dev/topics").to_return(ok(body))
+      res = Millionsend::Contacts::Topics.list(email: "c+news@x.dev")
+      expect(WebMock).to have_requested(:get, "https://api.test/contacts/c%2Bnews%40x.dev/topics")
+      expect(res).to eq({
+        object: "list", has_more: false,
+        data: [{ id: "9f3a2b1c-0000-0000-0000-000000000002", name: "Insights", description: nil,
+                 subscription: "opt_in", explicit: false }],
+      })
+
+      stub_request(:get, "https://api.test/contacts/c1/topics").to_return(ok(body))
+      Millionsend::Contacts::Topics.list("c1")
+      expect(WebMock).to have_requested(:get, "https://api.test/contacts/c1/topics")
+    end
+
     it "accepts resend-ruby's addressing hashes on get/remove, Topics.update and Segments" do
       stub_request(:get, "https://api.test/contacts/c1").to_return(ok)
       Millionsend::Contacts.get(id: "c1")

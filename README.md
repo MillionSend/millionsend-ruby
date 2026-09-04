@@ -5,7 +5,7 @@ self-hostable, Resend-compatible email API on AWS SES.
 
 The API is wire-compatible with Resend, and this gem deliberately mirrors the shape of
 [`resend`](https://github.com/resend/resend-ruby), so migrating is mostly a find-and-replace:
-swap the constant, set `base_url` to your instance.
+swap the constant (and, on a self-hosted instance, set `base_url`).
 
 ## Install
 
@@ -26,8 +26,8 @@ Requires Ruby 3.0+. Only the standard library is used at runtime (`net/http`, `j
 ```ruby
 require "millionsend"
 
-Millionsend.api_key  = "ms_123"
-Millionsend.base_url = "https://mail.acme.dev"
+Millionsend.api_key = "ms_123"
+# Millionsend.base_url = "https://mail.acme.dev" # self-hosted only; defaults to MillionSend Cloud
 
 email = Millionsend::Emails.send(
   from: "Acme <onboarding@acme.dev>",
@@ -47,12 +47,12 @@ on any non-2xx response (see [Error handling](#error-handling)).
 ```ruby
 Millionsend.api_key  = "ms_123"                # falls back to ENV["MILLIONSEND_API_KEY"]
 Millionsend.base_url = "https://mail.acme.dev" # falls back to ENV["MILLIONSEND_BASE_URL"],
-                                               # then http://localhost:3001
+                                               # then https://api.millionsend.com (Cloud)
 Millionsend.allow_insecure_http = false        # accept a non-loopback http:// base_url
 ```
 
-MillionSend is self-hosted, so there is no cloud default — **set `base_url` to your
-deployment in production.** An explicitly assigned value always wins over the environment.
+MillionSend Cloud works with just the API key; a self-hosted instance sets `base_url` to
+its origin. An explicitly assigned value always wins over the environment.
 Plain `http://` is only accepted for loopback hosts (`localhost`, `127.0.0.1`, `::1`); any
 other `http://` URL raises `Millionsend::ApplicationError` on the first call, since the API
 key is sent as a bearer header. Set `allow_insecure_http = true` to talk to a non-TLS
@@ -127,6 +127,8 @@ Millionsend::Contacts.list(limit: 50)
 # Topic subscriptions (granular unsubscribe) — PATCH /contacts/:id/topics
 Millionsend::Contacts::Topics.update(email: "ada@acme.dev", topics: [{ id: topic_id, subscription: "opt_out" }]) # resend-ruby shape
 Millionsend::Contacts.topics_update("ada@acme.dev", [{ id: topic_id, subscription: "opt_out" }])                 # positional
+Millionsend::Contacts::Topics.list(email: "ada@acme.dev") # GET /contacts/:id/topics — every topic with its effective
+                                                          # subscription; explicit: false when it is the topic's default
 
 # Segment membership — POST / DELETE /contacts/:id/segments/:segment_id
 Millionsend::Contacts::Segments.add("ada@acme.dev", segment_id)
@@ -326,11 +328,15 @@ rescue Millionsend::Error => e
 end
 ```
 
-Subclasses: `ValidationError`, `NotFoundError`, `MissingApiKeyError`, `InvalidApiKeyError`,
-`RestrictedApiKeyError`, `SendingPausedError`, `BroadcastsPausedError`, `RateLimitExceededError`,
-`DailyQuotaExceededError`, `InvalidIdempotentRequestError`, `ConcurrentIdempotentRequestsError`,
-`InternalServerError`, and `ApplicationError` (the fallback for unknown names). Client-side and
+Subclasses: `ValidationError`, `AllRecipientsSuppressedError`, `NotFoundError`,
+`MissingApiKeyError`, `InvalidApiKeyError`, `RestrictedApiKeyError`, `SendingPausedError`,
+`BroadcastsPausedError`, `RateLimitExceededError`, `DailyQuotaExceededError`,
+`InvalidIdempotentRequestError`, `ConcurrentIdempotentRequestsError`, `InternalServerError`, and
+`ApplicationError` (the fallback for unknown names). Client-side and
 transport failures that never reached the API raise `ApplicationError` with `#status_code == nil`.
+
+`Emails.send` and `Batch.send` raise `AllRecipientsSuppressedError` (`all_recipients_suppressed`,
+422) when every `to` recipient is on the suppression list or opted out of the send's `topic_id`.
 
 ## Migrating from Resend
 
@@ -340,7 +346,7 @@ transport failures that never reached the API raise `ApplicationError` with `#st
 - Resend::Emails.send(from: "...", to: "...", subject: "Hi", html: "<p>hi</p>")
 + require "millionsend"
 + Millionsend.api_key  = "ms_123"
-+ Millionsend.base_url = "https://mail.acme.dev"
++ Millionsend.base_url = "https://mail.acme.dev" # self-hosted only
 + Millionsend::Emails.send(from: "...", to: "...", subject: "Hi", html: "<p>hi</p>")
 ```
 
@@ -354,6 +360,7 @@ works as in resend-ruby. Notes:
   accepts both.
 - `Contacts` member methods and `Contacts::Segments` / `Contacts::Topics` accept resend-ruby's
   addressing hashes (`id:` / `email:` / `contact_id:`, `segment_id:`) as well as bare values.
+  `Contacts::Topics.list` is unpaginated, so resend-ruby's `limit:`/`after:`/`before:` are not sent.
   `Suppressions::Batch` is nested as in resend-ruby.
 - **No audiences** — contacts are team-global, so there is no `Audiences` resource and no
   `audience_id` params. The API's `/audiences/*` routes are a compatibility shim and are not

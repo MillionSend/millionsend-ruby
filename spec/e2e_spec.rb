@@ -2,8 +2,9 @@
 
 # Opt-in end-to-end smoke test against a real MillionSend instance. The whole
 # group only runs when MILLIONSEND_API_KEY is set; otherwise it is skipped. Set
-# MILLIONSEND_BASE_URL too if you are not on http://localhost:3001. It exercises
-# the contact lifecycle, which needs no verified sender domain.
+# MILLIONSEND_BASE_URL too for a self-hosted instance (the default is MillionSend
+# Cloud). It exercises the contact lifecycle, which needs no verified sender
+# domain.
 #
 #   MILLIONSEND_API_KEY=ms_... MILLIONSEND_BASE_URL=http://localhost:3001 \
 #     bundle exec rspec spec/e2e_spec.rb

@@ -28,13 +28,13 @@ require "millionsend/deliverability"
 #                            subject: "Hi", html: "<strong>it works</strong>")
 #
 # api_key falls back to the MILLIONSEND_API_KEY env var; base_url to
-# MILLIONSEND_BASE_URL and then http://localhost:3001 (MillionSend is
-# self-hosted, so there is no cloud default). Plain http is only accepted for
+# MILLIONSEND_BASE_URL and then MillionSend Cloud, so a self-hosted instance
+# sets its own origin. Plain http is only accepted for
 # loopback hosts unless allow_insecure_http is set, since the API key travels
 # as a bearer header. Every call returns a symbol-keyed Hash on success and
 # raises a Millionsend::Error on any non-2xx response.
 module Millionsend
-  DEFAULT_BASE_URL = "http://localhost:3001"
+  DEFAULT_BASE_URL = "https://api.millionsend.com"
   USER_AGENT = "millionsend-ruby/#{VERSION}"
 
   class << self
