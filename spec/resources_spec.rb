@@ -79,6 +79,70 @@ RSpec.describe "resource wiring" do
       expect(WebMock).to have_requested(:post, "https://api.test/emails/e1/cancel")
     end
 
+    it "send puts every REST field on the wire unchanged, including template and a null topic_id" do
+      stub_request(:post, "https://api.test/emails").to_return(ok)
+      payload = {
+        from: "Acme <onboarding@acme.dev>",
+        to: ["a@x.dev", "b@x.dev"],
+        subject: "Full",
+        html: "<p>hi</p>",
+        text: "hi",
+        cc: "cc@x.dev",
+        bcc: ["bcc@x.dev"],
+        reply_to: ["r1@x.dev", "r2@x.dev"],
+        scheduled_at: "in 2 hours",
+        tags: [{ name: "campaign", value: "launch" }],
+        topic_id: nil,
+        attachments: [{ filename: "a.txt", content: "aGVsbG8=", content_type: "text/plain",
+                        content_id: "cid1", path: "https://x.dev/a.txt" }],
+        headers: { "X-Entity-Ref-ID" => "42" },
+        template: { id: "tpl_1", variables: { name: "Ada" } },
+      }
+      Millionsend::Emails.send(payload)
+
+      expect(WebMock).to have_requested(:post, "https://api.test/emails").with(
+        body: {
+          "from" => "Acme <onboarding@acme.dev>",
+          "to" => ["a@x.dev", "b@x.dev"],
+          "subject" => "Full",
+          "html" => "<p>hi</p>",
+          "text" => "hi",
+          "cc" => "cc@x.dev",
+          "bcc" => ["bcc@x.dev"],
+          "reply_to" => ["r1@x.dev", "r2@x.dev"],
+          "scheduled_at" => "in 2 hours",
+          "tags" => [{ "name" => "campaign", "value" => "launch" }],
+          "topic_id" => nil,
+          "attachments" => [{ "filename" => "a.txt", "content" => "aGVsbG8=", "content_type" => "text/plain",
+                              "content_id" => "cid1", "path" => "https://x.dev/a.txt" }],
+          "headers" => { "X-Entity-Ref-ID" => "42" },
+          "template" => { "id" => "tpl_1", "variables" => { "name" => "Ada" } },
+        }
+      )
+      expect(WebMock).to(have_requested(:post, "https://api.test/emails")
+        .with { |req| JSON.parse(req.body).key?("topic_id") })
+    end
+
+    it "list hits GET /emails with pagination" do
+      stub_request(:get, "https://api.test/emails").with(query: { "limit" => "5", "after" => "e9" }).to_return(list_ok)
+      Millionsend::Emails.list(limit: 5, after: "e9")
+      expect(WebMock).to have_requested(:get, "https://api.test/emails").with(query: { "limit" => "5", "after" => "e9" })
+    end
+
+    it "update patches /emails/:id with scheduled_at, positional or resend-ruby hash shape" do
+      stub_request(:patch, "https://api.test/emails/e1").to_return(ok)
+      Millionsend::Emails.update("e1", scheduled_at: "2999-01-01T00:00:00Z")
+      Millionsend::Emails.update(email_id: "e1", scheduled_at: "2999-01-01T00:00:00Z")
+      expect(WebMock).to have_requested(:patch, "https://api.test/emails/e1")
+        .with(body: { "scheduled_at" => "2999-01-01T00:00:00Z" }).twice
+    end
+
+    it "remove hits DELETE /emails/:id" do
+      stub_request(:delete, "https://api.test/emails/e1").to_return(ok)
+      Millionsend::Emails.remove("e1")
+      expect(WebMock).to have_requested(:delete, "https://api.test/emails/e1")
+    end
+
     it "create is an alias of send that posts to /emails" do
       stub_request(:post, "https://api.test/emails").to_return(ok)
       Millionsend::Emails.create({ from: "a@x.dev", to: "b@x.dev", subject: "s", text: "t" })
@@ -99,6 +163,32 @@ RSpec.describe "resource wiring" do
       expect(WebMock).to(have_requested(:post, "https://api.test/emails/batch")
         .with(headers: { "Idempotency-Key" => "batch-1" }) { |req| JSON.parse(req.body).is_a?(Array) })
       expect(res[:data].length).to eq(2)
+    end
+
+    it "sends x-batch-validation and returns permissive-mode errors" do
+      stub_request(:post, "https://api.test/emails/batch").to_return(
+        ok('{"data":[{"id":"1"}],"errors":[{"index":1,"message":"to: invalid"}]}')
+      )
+      res = Millionsend::Batch.send(
+        [{ from: "a@x.dev", to: "b@x.dev", subject: "1", text: "one" }, { from: "a@x.dev", subject: "2" }],
+        batch_validation: "permissive"
+      )
+
+      expect(WebMock).to have_requested(:post, "https://api.test/emails/batch")
+        .with(headers: { "x-batch-validation" => "permissive" })
+      expect(res[:errors]).to eq([{ index: 1, message: "to: invalid" }])
+    end
+
+    it "accepts the resend-ruby options: keyword shape and omits the header when unset" do
+      stub_request(:post, "https://api.test/emails/batch").to_return(ok('{"data":[]}'))
+      Millionsend::Batch.send([{ from: "a@x.dev", to: "b@x.dev", subject: "1", text: "one" }],
+                              options: { idempotency_key: "k9", batch_validation: "strict" })
+      expect(WebMock).to have_requested(:post, "https://api.test/emails/batch")
+        .with(headers: { "Idempotency-Key" => "k9", "x-batch-validation" => "strict" })
+
+      Millionsend::Batch.send([{ from: "a@x.dev", to: "b@x.dev", subject: "1", text: "one" }])
+      expect(WebMock).to(have_requested(:post, "https://api.test/emails/batch")
+        .with { |req| !req.headers.key?("X-Batch-Validation") && !req.headers.key?("Idempotency-Key") })
     end
   end
 
@@ -143,10 +233,66 @@ RSpec.describe "resource wiring" do
       expect(WebMock).to have_requested(:patch, "https://api.test/contacts/c1/topics")
         .with(body: [{ "id" => "t1", "subscription" => "opt_out" }])
     end
+
+    it "create passes segments and topics through" do
+      stub_request(:post, "https://api.test/contacts").to_return(ok)
+      Millionsend::Contacts.create({
+        email: "c@x.dev", first_name: "Ada", last_name: "L", unsubscribed: false,
+        properties: { plan: "pro", seats: 3 }, segments: [{ id: "s1" }],
+        topics: [{ id: "t1", subscription: "opt_in" }],
+      })
+      expect(WebMock).to have_requested(:post, "https://api.test/contacts").with(
+        body: {
+          "email" => "c@x.dev", "first_name" => "Ada", "last_name" => "L", "unsubscribed" => false,
+          "properties" => { "plan" => "pro", "seats" => 3 }, "segments" => [{ "id" => "s1" }],
+          "topics" => [{ "id" => "t1", "subscription" => "opt_in" }],
+        }
+      )
+    end
+
+    it "Batch.create posts a bare array to /contacts/batch with on_conflict and the validation header" do
+      stub_request(:post, "https://api.test/contacts/batch").with(query: { "on_conflict" => "upsert" }).to_return(ok(
+        '{"data":[{"object":"contact","index":0,"id":"c1","status":"created"}],' \
+        '"counts":{"created":1,"updated":0,"skipped":0,"failed":1},"errors":[{"index":1,"message":"email: invalid"}]}'
+      ))
+      res = Millionsend::Contacts::Batch.create(
+        [{ email: "c@x.dev" }, { email: "nope" }],
+        on_conflict: "upsert", batch_validation: "permissive", idempotency_key: "cb-1"
+      )
+
+      expect(WebMock).to(have_requested(:post, "https://api.test/contacts/batch")
+        .with(query: { "on_conflict" => "upsert" },
+              headers: { "x-batch-validation" => "permissive", "Idempotency-Key" => "cb-1" },
+              body: [{ "email" => "c@x.dev" }, { "email" => "nope" }]))
+      expect(res[:data]).to eq([{ object: "contact", index: 0, id: "c1", status: "created" }])
+      expect(res[:counts]).to eq({ created: 1, updated: 0, skipped: 0, failed: 1 })
+      expect(res[:errors]).to eq([{ index: 1, message: "email: invalid" }])
+    end
+
+    it "Batch.create omits on_conflict and the header by default, also under options:" do
+      stub_request(:post, "https://api.test/contacts/batch").to_return(ok('{"data":[],"counts":{}}'))
+      stub_request(:post, "https://api.test/contacts/batch").with(query: { "on_conflict" => "skip" }).to_return(ok('{"data":[],"counts":{}}'))
+      Millionsend::Contacts::Batch.create([{ email: "c@x.dev" }])
+      Millionsend::Contacts::Batch.create([{ email: "c@x.dev" }], options: { on_conflict: "skip" })
+
+      expect(WebMock).to(have_requested(:post, "https://api.test/contacts/batch")
+        .with { |req| req.uri.query.nil? && !req.headers.key?("X-Batch-Validation") })
+      expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch").with(query: { "on_conflict" => "skip" })
+    end
+
+    it "Segments.add and .remove hit /contacts/:id/segments/:segment_id" do
+      stub_request(:post, "https://api.test/contacts/c%40x.dev/segments/s1").to_return(ok)
+      Millionsend::Contacts::Segments.add("c@x.dev", "s1")
+      expect(WebMock).to have_requested(:post, "https://api.test/contacts/c%40x.dev/segments/s1")
+
+      stub_request(:delete, "https://api.test/contacts/c1/segments/s1").to_return(ok)
+      Millionsend::Contacts::Segments.remove("c1", "s1")
+      expect(WebMock).to have_requested(:delete, "https://api.test/contacts/c1/segments/s1")
+    end
   end
 
   describe Millionsend::Topics do
-    it "covers create/get/list/remove" do
+    it "covers create/get/list/update/remove" do
       stub_request(:post, "https://api.test/topics").to_return(ok)
       Millionsend::Topics.create({ name: "Product", default_subscription: "opt_in" })
       expect(WebMock).to have_requested(:post, "https://api.test/topics")
@@ -159,6 +305,11 @@ RSpec.describe "resource wiring" do
       stub_request(:get, "https://api.test/topics").to_return(ok('{"data":[]}'))
       Millionsend::Topics.list
       expect(WebMock).to have_requested(:get, "https://api.test/topics")
+
+      stub_request(:patch, "https://api.test/topics/t1").to_return(ok)
+      Millionsend::Topics.update("t1", { name: "Renamed", visibility: "public" })
+      expect(WebMock).to have_requested(:patch, "https://api.test/topics/t1")
+        .with(body: { "name" => "Renamed", "visibility" => "public" })
 
       stub_request(:delete, "https://api.test/topics/t1").to_return(ok)
       Millionsend::Topics.remove("t1")
@@ -198,6 +349,26 @@ RSpec.describe "resource wiring" do
       Millionsend::Broadcasts.remove("b1")
       expect(WebMock).to have_requested(:delete, "https://api.test/broadcasts/b1")
     end
+
+    it "create passes every field through and update sends topic_id nil as JSON null" do
+      stub_request(:post, "https://api.test/broadcasts").to_return(ok)
+      Millionsend::Broadcasts.create({
+        name: "Launch", segment_id: "s1", from: "a@x.dev", subject: "News", html: "<p>hi</p>", text: "hi",
+        reply_to: "r@x.dev", preview_text: "pre", topic_id: "t1", send: true, scheduled_at: "in 1 hour",
+      })
+      expect(WebMock).to have_requested(:post, "https://api.test/broadcasts").with(
+        body: {
+          "name" => "Launch", "segment_id" => "s1", "from" => "a@x.dev", "subject" => "News", "html" => "<p>hi</p>",
+          "text" => "hi", "reply_to" => "r@x.dev", "preview_text" => "pre", "topic_id" => "t1", "send" => true,
+          "scheduled_at" => "in 1 hour",
+        }
+      )
+
+      stub_request(:patch, "https://api.test/broadcasts/b1").to_return(ok)
+      Millionsend::Broadcasts.update("b1", { topic_id: nil, preview_text: "p" })
+      expect(WebMock).to(have_requested(:patch, "https://api.test/broadcasts/b1")
+        .with { |req| req.body == '{"topic_id":null,"preview_text":"p"}' })
+    end
   end
 
   describe Millionsend::Deliverability do
@@ -232,7 +403,7 @@ RSpec.describe "resource wiring" do
   end
 
   describe Millionsend::Segments do
-    it "covers create/get/list/update/remove on /segments" do
+    it "covers create/get/list/contacts/update/remove on /segments" do
       filter = { match: "all", conditions: [{ field: "email", op: "is_set", value: nil }] }
 
       stub_request(:post, "https://api.test/segments").to_return(ok)
@@ -252,6 +423,10 @@ RSpec.describe "resource wiring" do
       Millionsend::Segments.list(before: "cur")
       expect(WebMock).to have_requested(:get, "https://api.test/segments").with(query: { "before" => "cur" })
 
+      stub_request(:get, "https://api.test/segments/s1/contacts").with(query: { "limit" => "10" }).to_return(list_ok)
+      Millionsend::Segments.contacts("s1", limit: 10)
+      expect(WebMock).to have_requested(:get, "https://api.test/segments/s1/contacts").with(query: { "limit" => "10" })
+
       stub_request(:patch, "https://api.test/segments/s1").to_return(ok)
       Millionsend::Segments.update("s1", { name: "Renamed" })
       expect(WebMock).to have_requested(:patch, "https://api.test/segments/s1").with(body: { "name" => "Renamed" })
@@ -259,6 +434,205 @@ RSpec.describe "resource wiring" do
       stub_request(:delete, "https://api.test/segments/s1").to_return(ok)
       Millionsend::Segments.remove("s1")
       expect(WebMock).to have_requested(:delete, "https://api.test/segments/s1")
+    end
+  end
+
+  describe Millionsend::Suppressions do
+    it "add/create post to /suppressions with email and origin" do
+      stub_request(:post, "https://api.test/suppressions").to_return(ok('{"object":"suppression","id":"sup1"}'))
+      Millionsend::Suppressions.add({ email: "bad@x.dev", origin: "manual" })
+      Millionsend::Suppressions.create({ email: "bad@x.dev" })
+      expect(WebMock).to have_requested(:post, "https://api.test/suppressions")
+        .with(body: { "email" => "bad@x.dev", "origin" => "manual" })
+      expect(WebMock).to have_requested(:post, "https://api.test/suppressions").with(body: { "email" => "bad@x.dev" })
+    end
+
+    it "list passes pagination and origin as query" do
+      stub_request(:get, "https://api.test/suppressions")
+        .with(query: { "limit" => "5", "origin" => "bounce" }).to_return(list_ok)
+      Millionsend::Suppressions.list(limit: 5, origin: "bounce")
+      expect(WebMock).to have_requested(:get, "https://api.test/suppressions")
+        .with(query: { "limit" => "5", "origin" => "bounce" })
+
+      stub_request(:get, "https://api.test/suppressions").to_return(list_ok)
+      Millionsend::Suppressions.list
+      expect(WebMock).to(have_requested(:get, "https://api.test/suppressions").with { |req| req.uri.query.nil? })
+    end
+
+    it "get and remove address by id or email" do
+      stub_request(:get, "https://api.test/suppressions/bad%40x.dev").to_return(ok)
+      Millionsend::Suppressions.get("bad@x.dev")
+      expect(WebMock).to have_requested(:get, "https://api.test/suppressions/bad%40x.dev")
+
+      stub_request(:delete, "https://api.test/suppressions/sup1").to_return(ok)
+      Millionsend::Suppressions.remove("sup1")
+      expect(WebMock).to have_requested(:delete, "https://api.test/suppressions/sup1")
+    end
+
+    it "Batch.add and Batch.remove post to /suppressions/batch/*" do
+      stub_request(:post, "https://api.test/suppressions/batch/add").to_return(ok('{"data":[{"object":"suppression","id":"1"}]}'))
+      Millionsend::Suppressions::Batch.add({ emails: ["a@x.dev", "b@x.dev"], origin: "unsubscribe" })
+      expect(WebMock).to have_requested(:post, "https://api.test/suppressions/batch/add")
+        .with(body: { "emails" => ["a@x.dev", "b@x.dev"], "origin" => "unsubscribe" })
+
+      stub_request(:post, "https://api.test/suppressions/batch/remove").to_return(ok('{"data":[]}'))
+      Millionsend::Suppressions::Batch.remove({ emails: ["a@x.dev"] })
+      Millionsend::Suppressions::Batch.remove({ ids: ["sup1", "sup2"] })
+      expect(WebMock).to have_requested(:post, "https://api.test/suppressions/batch/remove")
+        .with(body: { "emails" => ["a@x.dev"] })
+      expect(WebMock).to have_requested(:post, "https://api.test/suppressions/batch/remove")
+        .with(body: { "ids" => ["sup1", "sup2"] })
+    end
+  end
+
+  describe Millionsend::Domains do
+    it "covers create/get/list/update/verify/remove" do
+      stub_request(:post, "https://api.test/domains").to_return(ok)
+      Millionsend::Domains.create({ name: "acme.dev", region: "us-east-1", custom_return_path: "bounce",
+                                    open_tracking: true, click_tracking: true, tracking_subdomain: "links" })
+      expect(WebMock).to have_requested(:post, "https://api.test/domains").with(
+        body: { "name" => "acme.dev", "region" => "us-east-1", "custom_return_path" => "bounce",
+                "open_tracking" => true, "click_tracking" => true, "tracking_subdomain" => "links" }
+      )
+
+      stub_request(:get, "https://api.test/domains/d1").to_return(ok)
+      Millionsend::Domains.get("d1")
+      expect(WebMock).to have_requested(:get, "https://api.test/domains/d1")
+
+      stub_request(:get, "https://api.test/domains").with(query: { "limit" => "3" }).to_return(list_ok)
+      Millionsend::Domains.list(limit: 3)
+      expect(WebMock).to have_requested(:get, "https://api.test/domains").with(query: { "limit" => "3" })
+
+      stub_request(:patch, "https://api.test/domains/d1").to_return(ok)
+      Millionsend::Domains.update("d1", { open_tracking: false, click_tracking: true, tracking_subdomain: nil })
+      expect(WebMock).to(have_requested(:patch, "https://api.test/domains/d1")
+        .with { |req| req.body == '{"open_tracking":false,"click_tracking":true,"tracking_subdomain":null}' })
+
+      stub_request(:post, "https://api.test/domains/d1/verify").to_return(ok)
+      Millionsend::Domains.verify("d1")
+      expect(WebMock).to have_requested(:post, "https://api.test/domains/d1/verify")
+
+      stub_request(:delete, "https://api.test/domains/d1").to_return(ok)
+      Millionsend::Domains.remove("d1")
+      expect(WebMock).to have_requested(:delete, "https://api.test/domains/d1")
+    end
+  end
+
+  describe Millionsend::Webhooks do
+    it "covers create/get/list/update/remove" do
+      stub_request(:post, "https://api.test/webhooks").to_return(ok('{"object":"webhook","id":"w1","signing_secret":"whsec_x"}'))
+      res = Millionsend::Webhooks.create({ endpoint: "https://x.dev/hook", events: ["email.sent", "email.bounced"],
+                                           signing_secret: "whsec_abc" })
+      expect(WebMock).to have_requested(:post, "https://api.test/webhooks").with(
+        body: { "endpoint" => "https://x.dev/hook", "events" => ["email.sent", "email.bounced"], "signing_secret" => "whsec_abc" }
+      )
+      expect(res[:signing_secret]).to eq("whsec_x")
+
+      stub_request(:get, "https://api.test/webhooks/w1").to_return(ok('{"object":"webhook","id":"w1","signing_secret":"whsec_x"}'))
+      expect(Millionsend::Webhooks.get("w1")[:signing_secret]).to eq("whsec_x")
+
+      stub_request(:get, "https://api.test/webhooks").with(query: { "after" => "w0" }).to_return(list_ok)
+      Millionsend::Webhooks.list(after: "w0")
+      expect(WebMock).to have_requested(:get, "https://api.test/webhooks").with(query: { "after" => "w0" })
+
+      stub_request(:patch, "https://api.test/webhooks/w1").to_return(ok)
+      Millionsend::Webhooks.update("w1", { endpoint: "https://x.dev/h2", events: ["email.opened"], status: "disabled" })
+      expect(WebMock).to have_requested(:patch, "https://api.test/webhooks/w1")
+        .with(body: { "endpoint" => "https://x.dev/h2", "events" => ["email.opened"], "status" => "disabled" })
+
+      stub_request(:delete, "https://api.test/webhooks/w1").to_return(ok)
+      Millionsend::Webhooks.remove("w1")
+      expect(WebMock).to have_requested(:delete, "https://api.test/webhooks/w1")
+    end
+  end
+
+  describe Millionsend::ApiKeys do
+    it "covers create/list/remove" do
+      stub_request(:post, "https://api.test/api-keys").to_return(ok('{"id":"k1","token":"ms_secret"}'))
+      res = Millionsend::ApiKeys.create({ name: "ci", permission: "sending_access", domain_id: "d1" })
+      expect(WebMock).to have_requested(:post, "https://api.test/api-keys")
+        .with(body: { "name" => "ci", "permission" => "sending_access", "domain_id" => "d1" })
+      expect(res).to eq({ id: "k1", token: "ms_secret" })
+
+      stub_request(:get, "https://api.test/api-keys").to_return(list_ok)
+      Millionsend::ApiKeys.list
+      expect(WebMock).to have_requested(:get, "https://api.test/api-keys")
+
+      stub_request(:delete, "https://api.test/api-keys/k1").to_return(ok)
+      Millionsend::ApiKeys.remove("k1")
+      expect(WebMock).to have_requested(:delete, "https://api.test/api-keys/k1")
+    end
+  end
+
+  describe Millionsend::Templates do
+    it "covers create/get/list/update/publish/duplicate/remove, by id or alias" do
+      stub_request(:post, "https://api.test/templates").to_return(ok)
+      Millionsend::Templates.create({ name: "Welcome", html: "<p>hi</p>", subject: "Hi", text: "hi", alias: "welcome" })
+      expect(WebMock).to have_requested(:post, "https://api.test/templates").with(
+        body: { "name" => "Welcome", "html" => "<p>hi</p>", "subject" => "Hi", "text" => "hi", "alias" => "welcome" }
+      )
+
+      stub_request(:get, "https://api.test/templates/welcome").to_return(ok)
+      Millionsend::Templates.get("welcome")
+      expect(WebMock).to have_requested(:get, "https://api.test/templates/welcome")
+
+      stub_request(:get, "https://api.test/templates").with(query: { "before" => "t0" }).to_return(list_ok)
+      Millionsend::Templates.list(before: "t0")
+      expect(WebMock).to have_requested(:get, "https://api.test/templates").with(query: { "before" => "t0" })
+
+      stub_request(:patch, "https://api.test/templates/t1").to_return(ok)
+      Millionsend::Templates.update("t1", { name: "W2", alias: nil, subject: nil, text: nil })
+      expect(WebMock).to(have_requested(:patch, "https://api.test/templates/t1")
+        .with { |req| req.body == '{"name":"W2","alias":null,"subject":null,"text":null}' })
+
+      stub_request(:post, "https://api.test/templates/t1/publish").to_return(ok)
+      Millionsend::Templates.publish("t1")
+      expect(WebMock).to have_requested(:post, "https://api.test/templates/t1/publish")
+
+      stub_request(:post, "https://api.test/templates/t1/duplicate").to_return(ok)
+      Millionsend::Templates.duplicate("t1")
+      expect(WebMock).to have_requested(:post, "https://api.test/templates/t1/duplicate")
+
+      stub_request(:delete, "https://api.test/templates/welcome").to_return(ok)
+      Millionsend::Templates.remove("welcome")
+      expect(WebMock).to have_requested(:delete, "https://api.test/templates/welcome")
+    end
+  end
+
+  describe Millionsend::ContactProperties do
+    it "covers create/get/list/update/remove" do
+      stub_request(:post, "https://api.test/contact-properties").to_return(ok)
+      Millionsend::ContactProperties.create({ key: "plan", type: "string", fallback_value: "free" })
+      expect(WebMock).to have_requested(:post, "https://api.test/contact-properties")
+        .with(body: { "key" => "plan", "type" => "string", "fallback_value" => "free" })
+
+      stub_request(:get, "https://api.test/contact-properties/p1").to_return(ok)
+      Millionsend::ContactProperties.get("p1")
+      expect(WebMock).to have_requested(:get, "https://api.test/contact-properties/p1")
+
+      stub_request(:get, "https://api.test/contact-properties").with(query: { "limit" => "50" }).to_return(list_ok)
+      Millionsend::ContactProperties.list(limit: 50)
+      expect(WebMock).to have_requested(:get, "https://api.test/contact-properties").with(query: { "limit" => "50" })
+
+      stub_request(:patch, "https://api.test/contact-properties/p1").to_return(ok)
+      Millionsend::ContactProperties.update("p1", { fallback_value: nil })
+      expect(WebMock).to(have_requested(:patch, "https://api.test/contact-properties/p1")
+        .with { |req| req.body == '{"fallback_value":null}' })
+
+      stub_request(:delete, "https://api.test/contact-properties/p1").to_return(ok)
+      Millionsend::ContactProperties.remove("p1")
+      expect(WebMock).to have_requested(:delete, "https://api.test/contact-properties/p1")
+    end
+  end
+
+  describe Millionsend::Usage do
+    it "get hits GET /usage" do
+      body = { object: "usage", cloud: true, plan: "pro", limits: { emails_per_day: 50_000, domains: 10 },
+               today: { emails_sent: 12, resets_at: "2026-09-05T00:00:00.000Z" },
+               team: { id: "t1", name: "Acme" }, app_url: "https://app.x.dev" }
+      stub_request(:get, "https://api.test/usage").to_return(ok(JSON.generate(body)))
+      expect(Millionsend::Usage.get).to eq(body)
+      expect(WebMock).to have_requested(:get, "https://api.test/usage")
     end
   end
 end

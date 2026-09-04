@@ -22,6 +22,15 @@ module Millionsend
         ).perform
       end
 
+      # GET /segments/:id/contacts — the contacts currently matching, paginated
+      # with limit:/after:/before:.
+      def contacts(id, options = {})
+        Millionsend::Request.new(
+          method: :get, path: "/segments/#{Millionsend::Util.encode(id)}/contacts",
+          query: Millionsend::Util.list_query(options)
+        ).perform
+      end
+
       # PATCH /segments/:id
       def update(id, params)
         Millionsend::Request.new(method: :patch, path: "/segments/#{Millionsend::Util.encode(id)}", body: params).perform

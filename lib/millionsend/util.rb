@@ -32,5 +32,15 @@ module Millionsend
       options ||= {}
       { limit: options[:limit], after: options[:after], before: options[:before] }
     end
+
+    # Per-request options for the Request constructor. Both call shapes land in
+    # the same trailing positional hash: the original `idempotency_key: "k"` and
+    # resend-ruby's keyword form `options: { idempotency_key: "k" }`, so the
+    # latter is unwrapped here.
+    def request_options(options)
+      options = options[:options] if options.is_a?(Hash) && options.key?(:options)
+      options ||= {}
+      { idempotency_key: options[:idempotency_key], batch_validation: options[:batch_validation] }
+    end
   end
 end

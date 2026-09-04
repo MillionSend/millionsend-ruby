@@ -26,12 +26,13 @@ module Millionsend
       Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError
     ].freeze
 
-    def initialize(method:, path:, body: nil, query: nil, idempotency_key: nil)
+    def initialize(method:, path:, body: nil, query: nil, idempotency_key: nil, batch_validation: nil)
       @method = method
       @path = path
       @body = body
       @query = query
       @idempotency_key = idempotency_key
+      @batch_validation = batch_validation
     end
 
     def perform
@@ -88,6 +89,7 @@ module Millionsend
       end
       # Idempotency is POST-only on the wire; ignored on other verbs.
       request["Idempotency-Key"] = @idempotency_key if @idempotency_key && @method == :post
+      request["x-batch-validation"] = @batch_validation.to_s if @batch_validation
       request
     end
 

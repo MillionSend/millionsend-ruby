@@ -32,17 +32,31 @@ module Millionsend
 
   class ValidationError < Error; end
   class NotFoundError < Error; end
+  class MissingApiKeyError < Error; end
+  class InvalidApiKeyError < Error; end
   class RestrictedApiKeyError < Error; end
   class SendingPausedError < Error; end
+  class BroadcastsPausedError < Error; end
+  class RateLimitExceededError < Error; end
+  class DailyQuotaExceededError < Error; end
   class InvalidIdempotentRequestError < Error; end
+  class ConcurrentIdempotentRequestsError < Error; end
+  class InternalServerError < Error; end
   class ApplicationError < Error; end
 
   ERROR_TYPES = {
     "validation_error" => ValidationError,
     "not_found" => NotFoundError,
+    "missing_api_key" => MissingApiKeyError,
+    "invalid_api_key" => InvalidApiKeyError,
     "restricted_api_key" => RestrictedApiKeyError,
     "sending_paused" => SendingPausedError,
+    "broadcasts_paused" => BroadcastsPausedError,
+    "rate_limit_exceeded" => RateLimitExceededError,
+    "daily_quota_exceeded" => DailyQuotaExceededError,
     "invalid_idempotent_request" => InvalidIdempotentRequestError,
+    "concurrent_idempotent_requests" => ConcurrentIdempotentRequestsError,
+    "internal_server_error" => InternalServerError,
     "application_error" => ApplicationError,
   }.freeze
 end

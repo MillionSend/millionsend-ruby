@@ -62,6 +62,15 @@ RSpec.describe Millionsend do
         .with(headers: { "Idempotency-Key" => "key-123" })
     end
 
+    it "accepts resend-ruby's options: keyword shape on emails.send" do
+      stub_request(:post, "https://api.test/emails").to_return(ok)
+      Millionsend::Emails.send({ from: "a@x.dev", to: "b@x.dev", subject: "s", text: "t" },
+                               options: { idempotency_key: "key-456" })
+
+      expect(WebMock).to have_requested(:post, "https://api.test/emails")
+        .with(headers: { "Idempotency-Key" => "key-456" }, body: { "from" => "a@x.dev", "to" => "b@x.dev", "subject" => "s", "text" => "t" })
+    end
+
     it "omits Idempotency-Key when not provided" do
       stub_request(:post, "https://api.test/emails").to_return(ok)
       Millionsend::Emails.send({ from: "a@x.dev", to: "b@x.dev", subject: "s", text: "t" })
@@ -138,6 +147,26 @@ RSpec.describe Millionsend do
       )
 
       expect { Millionsend::Contacts.get("nope") }.to raise_error(Millionsend::NotFoundError)
+    end
+
+    it "maps every API error name to its class" do
+      {
+        "missing_api_key" => Millionsend::MissingApiKeyError,
+        "invalid_api_key" => Millionsend::InvalidApiKeyError,
+        "restricted_api_key" => Millionsend::RestrictedApiKeyError,
+        "sending_paused" => Millionsend::SendingPausedError,
+        "broadcasts_paused" => Millionsend::BroadcastsPausedError,
+        "rate_limit_exceeded" => Millionsend::RateLimitExceededError,
+        "daily_quota_exceeded" => Millionsend::DailyQuotaExceededError,
+        "invalid_idempotent_request" => Millionsend::InvalidIdempotentRequestError,
+        "concurrent_idempotent_requests" => Millionsend::ConcurrentIdempotentRequestsError,
+        "internal_server_error" => Millionsend::InternalServerError,
+        "unknown_future_name" => Millionsend::ApplicationError,
+      }.each do |name, klass|
+        err = Millionsend::Error.from_response(400, { statusCode: 400, name: name, message: "m" })
+        expect(err).to be_a(klass)
+        expect(err.name).to eq(name)
+      end
     end
 
     it "falls back to ApplicationError for a non-canonical error body" do
