@@ -10,7 +10,8 @@ module Millionsend
         Millionsend::Request.new(method: :post, path: "/webhooks", body: params).perform
       end
 
-      # GET /webhooks/:id — includes signing_secret.
+      # GET /webhooks/:id — includes signing_secret and
+      # previous_secret_expires_at (nil unless a rotation's overlap window is open).
       def get(id)
         Millionsend::Request.new(method: :get, path: member_path(id)).perform
       end
@@ -28,6 +29,14 @@ module Millionsend
       # DELETE /webhooks/:id
       def remove(id)
         Millionsend::Request.new(method: :delete, path: member_path(id)).perform
+      end
+
+      # POST /webhooks/:id/rotate — signing_secret (optional whsec_ value to
+      # bring your own; omitted mints one) and overlap_hours (0..72, default
+      # 24) during which deliveries carry both signatures. Returns { object:,
+      # id:, signing_secret:, previous_secret_expires_at: }.
+      def rotate(id, params = {})
+        Millionsend::Request.new(method: :post, path: "#{member_path(id)}/rotate", body: params).perform
       end
 
       private

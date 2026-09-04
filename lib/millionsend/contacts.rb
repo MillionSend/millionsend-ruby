@@ -42,6 +42,14 @@ module Millionsend
         Millionsend::Request.new(method: :patch, path: "#{member_path(id_or_email)}/topics", body: topics).perform
       end
 
+      # POST /contacts/:id_or_email/preferences-link — the contact's hosted
+      # preference page, { object: "preferences_link", contact:, url: }. The
+      # url is a contact-scoped capability with no expiry: hand it only to that
+      # contact. 422 when the instance cannot build hosted links.
+      def preferences_link(id_or_email)
+        Millionsend::Request.new(method: :post, path: "#{member_path(id_or_email)}/preferences-link").perform
+      end
+
       # Every member method also accepts resend-ruby's addressing hash
       # ({ id: } / { email: } / { contact_id: }) in place of the bare value.
       def member_path(id_or_email)
@@ -54,9 +62,10 @@ module Millionsend
     module Topics
       class << self
         # GET /contacts/:id_or_email/topics — { id: | email: } or a bare id/email.
-        # Every topic comes back with the contact's effective subscription;
-        # explicit: false means it is the topic's default, not a stored choice.
-        # Unpaginated, like Topics.list.
+        # Every topic comes back with the contact's effective subscription
+        # (explicit: false means it is the topic's default, not a stored
+        # choice) and its visibility ("public" | "private"). Unpaginated, like
+        # Topics.list.
         def list(params)
           Millionsend::Request.new(method: :get, path: "#{Millionsend::Contacts.member_path(params)}/topics").perform
         end
@@ -68,7 +77,8 @@ module Millionsend
       end
     end
 
-    # Bulk contact creation — a MillionSend extension (Resend imports via CSV).
+    # Bulk contact creation and deletion — MillionSend extensions (Resend
+    # imports via CSV and deletes one at a time).
     module Batch
       class << self
         # POST /contacts/batch with a bare array of up to 1000 create payloads.
@@ -84,6 +94,14 @@ module Millionsend
             query: { on_conflict: options[:on_conflict] },
             **Millionsend::Util.request_options(options)
           ).perform
+        end
+
+        # POST /contacts/batch/remove — { ids: [...] } or { emails: [...] }
+        # (exactly one, up to 1000). Returns { data: [{ object:, contact:,
+        # deleted: true }] } listing only the rows actually deleted; unknown
+        # ids or addresses are skipped.
+        def remove(params)
+          Millionsend::Request.new(method: :post, path: "/contacts/batch/remove", body: params).perform
         end
       end
     end

@@ -236,14 +236,14 @@ RSpec.describe "resource wiring" do
 
     it "Topics.list hits GET /contacts/:id_or_email/topics with the email encoded and decodes the shape" do
       body = '{"object":"list","has_more":false,"data":[{"id":"9f3a2b1c-0000-0000-0000-000000000002",' \
-             '"name":"Insights","description":null,"subscription":"opt_in","explicit":false}]}'
+             '"name":"Insights","description":null,"subscription":"opt_in","explicit":false,"visibility":"public"}]}'
       stub_request(:get, "https://api.test/contacts/c%2Bnews%40x.dev/topics").to_return(ok(body))
       res = Millionsend::Contacts::Topics.list(email: "c+news@x.dev")
       expect(WebMock).to have_requested(:get, "https://api.test/contacts/c%2Bnews%40x.dev/topics")
       expect(res).to eq({
         object: "list", has_more: false,
         data: [{ id: "9f3a2b1c-0000-0000-0000-000000000002", name: "Insights", description: nil,
-                 subscription: "opt_in", explicit: false }],
+                 subscription: "opt_in", explicit: false, visibility: "public" }],
       })
 
       stub_request(:get, "https://api.test/contacts/c1/topics").to_return(ok(body))
@@ -318,6 +318,32 @@ RSpec.describe "resource wiring" do
       expect(WebMock).to(have_requested(:post, "https://api.test/contacts/batch")
         .with { |req| req.uri.query.nil? && !req.headers.key?("X-Batch-Validation") })
       expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch").with(query: { "on_conflict" => "skip" })
+    end
+
+    it "preferences_link posts to /contacts/:id_or_email/preferences-link with no body" do
+      body = '{"object":"preferences_link","contact":"9f3a2b1c-0000-0000-0000-000000000001","url":"https://app.test/unsubscribe/tok"}'
+      stub_request(:post, "https://api.test/contacts/c%2Bnews%40x.dev/preferences-link").to_return(ok(body))
+      res = Millionsend::Contacts.preferences_link("c+news@x.dev")
+      expect(WebMock).to(have_requested(:post, "https://api.test/contacts/c%2Bnews%40x.dev/preferences-link")
+        .with { |req| req.body.nil? || req.body.empty? })
+      expect(res).to eq({ object: "preferences_link", contact: "9f3a2b1c-0000-0000-0000-000000000001",
+                          url: "https://app.test/unsubscribe/tok" })
+
+      stub_request(:post, "https://api.test/contacts/c1/preferences-link").to_return(ok(body))
+      Millionsend::Contacts.preferences_link(id: "c1")
+      expect(WebMock).to have_requested(:post, "https://api.test/contacts/c1/preferences-link")
+    end
+
+    it "Batch.remove posts ids or emails to /contacts/batch/remove" do
+      stub_request(:post, "https://api.test/contacts/batch/remove")
+        .to_return(ok('{"data":[{"object":"contact","contact":"c1","deleted":true}]}'))
+      res = Millionsend::Contacts::Batch.remove({ ids: ["c1", "c2"] })
+      Millionsend::Contacts::Batch.remove({ emails: ["a@x.dev"] })
+      expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch/remove")
+        .with(body: { "ids" => ["c1", "c2"] })
+      expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch/remove")
+        .with(body: { "emails" => ["a@x.dev"] })
+      expect(res[:data]).to eq([{ object: "contact", contact: "c1", deleted: true }])
     end
 
     it "Segments.add and .remove hit /contacts/:id/segments/:segment_id" do
@@ -568,8 +594,12 @@ RSpec.describe "resource wiring" do
       )
       expect(res[:signing_secret]).to eq("whsec_x")
 
-      stub_request(:get, "https://api.test/webhooks/w1").to_return(ok('{"object":"webhook","id":"w1","signing_secret":"whsec_x"}'))
-      expect(Millionsend::Webhooks.get("w1")[:signing_secret]).to eq("whsec_x")
+      stub_request(:get, "https://api.test/webhooks/w1")
+        .to_return(ok('{"object":"webhook","id":"w1","signing_secret":"whsec_x","previous_secret_expires_at":null}'))
+      hook = Millionsend::Webhooks.get("w1")
+      expect(hook[:signing_secret]).to eq("whsec_x")
+      expect(hook).to have_key(:previous_secret_expires_at)
+      expect(hook[:previous_secret_expires_at]).to be_nil
 
       stub_request(:get, "https://api.test/webhooks").with(query: { "after" => "w0" }).to_return(list_ok)
       Millionsend::Webhooks.list(after: "w0")
@@ -583,6 +613,19 @@ RSpec.describe "resource wiring" do
       stub_request(:delete, "https://api.test/webhooks/w1").to_return(ok)
       Millionsend::Webhooks.remove("w1")
       expect(WebMock).to have_requested(:delete, "https://api.test/webhooks/w1")
+    end
+
+    it "rotate posts to /webhooks/:id/rotate, {} by default" do
+      body = '{"object":"webhook","id":"w1","signing_secret":"whsec_new","previous_secret_expires_at":"2026-01-02T00:00:00.000Z"}'
+      stub_request(:post, "https://api.test/webhooks/w1/rotate").to_return(ok(body))
+      res = Millionsend::Webhooks.rotate("w1")
+      expect(WebMock).to have_requested(:post, "https://api.test/webhooks/w1/rotate").with(body: "{}")
+      expect(res).to eq({ object: "webhook", id: "w1", signing_secret: "whsec_new",
+                          previous_secret_expires_at: "2026-01-02T00:00:00.000Z" })
+
+      Millionsend::Webhooks.rotate("w1", { signing_secret: "whsec_mine", overlap_hours: 0 })
+      expect(WebMock).to have_requested(:post, "https://api.test/webhooks/w1/rotate")
+        .with(body: { "signing_secret" => "whsec_mine", "overlap_hours" => 0 })
     end
   end
 

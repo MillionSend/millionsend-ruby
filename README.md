@@ -128,7 +128,12 @@ Millionsend::Contacts.list(limit: 50)
 Millionsend::Contacts::Topics.update(email: "ada@acme.dev", topics: [{ id: topic_id, subscription: "opt_out" }]) # resend-ruby shape
 Millionsend::Contacts.topics_update("ada@acme.dev", [{ id: topic_id, subscription: "opt_out" }])                 # positional
 Millionsend::Contacts::Topics.list(email: "ada@acme.dev") # GET /contacts/:id/topics — every topic with its effective
-                                                          # subscription; explicit: false when it is the topic's default
+                                                          # subscription (explicit: false when it is the topic's default)
+                                                          # and its visibility ("public" | "private")
+
+# Preference-center link (MillionSend extension) — POST /contacts/:id/preferences-link
+link = Millionsend::Contacts.preferences_link("ada@acme.dev") # by id or email; also preferences_link(id: ...) / (email: ...)
+link[:url] # the contact's hosted preference page; no expiry, so show it only to that contact
 
 # Segment membership — POST / DELETE /contacts/:id/segments/:segment_id
 Millionsend::Contacts::Segments.add("ada@acme.dev", segment_id)
@@ -143,6 +148,10 @@ result = Millionsend::Contacts::Batch.create(
 result[:data]   # [{ index:, id:, status: "created" | "updated" | "skipped" }]
 result[:counts] # { created:, updated:, skipped:, failed: }
 result[:errors] # permissive mode only: [{ index:, message: }]
+
+# Bulk delete (MillionSend extension) — up to 1000 per call, exactly one of ids: / emails:
+Millionsend::Contacts::Batch.remove(emails: ["a@acme.dev", "b@acme.dev"]) # or ids: [...]
+# => { data: [{ object: "contact", contact: "<uuid>", deleted: true }, ...] } — only the rows actually deleted
 ```
 
 Contacts are addressable by id or email; when an `update` hash carries both, the email wins.
@@ -237,14 +246,26 @@ hook = Millionsend::Webhooks.create(
   signing_secret: "whsec_..." # optional: reuse an existing secret so the receiver keeps verifying
 )
 hook[:signing_secret]
-Millionsend::Webhooks.get(hook[:id]) # also returns signing_secret
+Millionsend::Webhooks.get(hook[:id]) # also returns signing_secret and previous_secret_expires_at
 Millionsend::Webhooks.list
 Millionsend::Webhooks.update(hook[:id], events: ["email.opened"], status: "disabled")
 Millionsend::Webhooks.remove(hook[:id])
+
+# Rotate the signing secret (MillionSend extension) — POST /webhooks/:id/rotate
+rotated = Millionsend::Webhooks.rotate(hook[:id])                                         # mints a new secret, 24h overlap
+rotated = Millionsend::Webhooks.rotate(hook[:id], signing_secret: "whsec_...", overlap_hours: 0) # bring your own, no overlap
+rotated[:signing_secret]              # the secret now signing deliveries
+rotated[:previous_secret_expires_at]  # ISO time until which the old secret also signs, or nil
 ```
 
+During the overlap window (`overlap_hours`, 0–72, default 24) every delivery carries both
+signatures, so a receiver holding either verifies; `Webhooks.get` reports the window's end
+as `previous_secret_expires_at` (`nil` when none is open).
+
 Events: `email.sent`, `email.delivered`, `email.delivery_delayed`, `email.bounced`,
-`email.complained`, `email.opened`, `email.clicked`, `deliverability.warning`,
+`email.complained`, `email.opened`, `email.clicked`, `contact.created`, `contact.updated`,
+`contact.deleted`, `contact.unsubscribed`, `contact.resubscribed`, `contact.topic_opt_in`,
+`contact.topic_opt_out`, `suppression.added`, `suppression.removed`, `deliverability.warning`,
 `deliverability.paused`, `quota.warning`, `quota.reached`, `quota.paused`.
 
 ### API keys
@@ -368,8 +389,9 @@ works as in resend-ruby. Notes:
   Resend's audiences alias.
 - Not in the API (yet), so not here: broadcast recipients/clicked links, email sharing and
   metrics, contact imports, receiving, automations, logs, OAuth grants, webhook event replay.
-- MillionSend extensions with no Resend counterpart: `Segments`, `Contacts::Batch`, `Usage`,
-  `Deliverability`, `Emails.get_insights`, `Suppressions` `origin: "unsubscribe"`.
+- MillionSend extensions with no Resend counterpart: `Segments`, `Contacts::Batch`,
+  `Contacts.preferences_link`, `Webhooks.rotate`, `Usage`, `Deliverability`,
+  `Emails.get_insights`, `Suppressions` `origin: "unsubscribe"`.
 
 ## License
 
