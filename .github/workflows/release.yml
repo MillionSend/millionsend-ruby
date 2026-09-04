@@ -5,6 +5,8 @@ name: release
 # workflow release.yml). No API key stored anywhere.
 on:
   workflow_dispatch:
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -17,6 +19,11 @@ jobs:
       id-token: write # OIDC for RubyGems Trusted Publishing
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # A tag publishes exactly the version the manifest declares; a tag that
+      # disagrees with it is refused instead of shipping the wrong number.
+      - name: Tag must match the manifest version
+        if: github.ref_type == 'tag'
+        run: test "v$(sed -n 's/.*VERSION = "\(.*\)"/\1/p' lib/millionsend/version.rb)" = "$GITHUB_REF_NAME"
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
         with:
           ruby-version: "3.3"
