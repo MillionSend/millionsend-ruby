@@ -234,6 +234,29 @@ RSpec.describe "resource wiring" do
         .with(body: [{ "id" => "t1", "subscription" => "opt_out" }])
     end
 
+    it "accepts resend-ruby's addressing hashes on get/remove, Topics.update and Segments" do
+      stub_request(:get, "https://api.test/contacts/c1").to_return(ok)
+      Millionsend::Contacts.get(id: "c1")
+      expect(WebMock).to have_requested(:get, "https://api.test/contacts/c1")
+
+      stub_request(:delete, "https://api.test/contacts/c%40x.dev").to_return(ok)
+      Millionsend::Contacts.remove(email: "c@x.dev")
+      expect(WebMock).to have_requested(:delete, "https://api.test/contacts/c%40x.dev")
+
+      stub_request(:patch, "https://api.test/contacts/c%40x.dev/topics").to_return(ok)
+      Millionsend::Contacts::Topics.update(email: "c@x.dev", topics: [{ id: "t1", subscription: "opt_in" }])
+      expect(WebMock).to have_requested(:patch, "https://api.test/contacts/c%40x.dev/topics")
+        .with(body: [{ "id" => "t1", "subscription" => "opt_in" }])
+
+      stub_request(:post, "https://api.test/contacts/c1/segments/s1").to_return(ok)
+      Millionsend::Contacts::Segments.add(contact_id: "c1", segment_id: "s1")
+      expect(WebMock).to have_requested(:post, "https://api.test/contacts/c1/segments/s1")
+
+      stub_request(:delete, "https://api.test/contacts/c%40x.dev/segments/s1").to_return(ok)
+      Millionsend::Contacts::Segments.remove(email: "c@x.dev", segment_id: "s1")
+      expect(WebMock).to have_requested(:delete, "https://api.test/contacts/c%40x.dev/segments/s1")
+    end
+
     it "create passes segments and topics through" do
       stub_request(:post, "https://api.test/contacts").to_return(ok)
       Millionsend::Contacts.create({
@@ -567,9 +590,13 @@ RSpec.describe "resource wiring" do
   describe Millionsend::Templates do
     it "covers create/get/list/update/publish/duplicate/remove, by id or alias" do
       stub_request(:post, "https://api.test/templates").to_return(ok)
-      Millionsend::Templates.create({ name: "Welcome", html: "<p>hi</p>", subject: "Hi", text: "hi", alias: "welcome" })
+      Millionsend::Templates.create({ name: "Welcome", html: "<p>hi</p>", subject: "Hi", text: "hi", alias: "welcome",
+                                      from: "a@x.dev", reply_to: ["r@x.dev"],
+                                      variables: [{ key: "name", type: "string", fallback_value: "there" }] })
       expect(WebMock).to have_requested(:post, "https://api.test/templates").with(
-        body: { "name" => "Welcome", "html" => "<p>hi</p>", "subject" => "Hi", "text" => "hi", "alias" => "welcome" }
+        body: { "name" => "Welcome", "html" => "<p>hi</p>", "subject" => "Hi", "text" => "hi", "alias" => "welcome",
+                "from" => "a@x.dev", "reply_to" => ["r@x.dev"],
+                "variables" => [{ "key" => "name", "type" => "string", "fallback_value" => "there" }] }
       )
 
       stub_request(:get, "https://api.test/templates/welcome").to_return(ok)

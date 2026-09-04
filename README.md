@@ -119,17 +119,18 @@ contact = Millionsend::Contacts.create(
   segments: [{ id: segment_id }],
   topics: [{ id: topic_id, subscription: "opt_in" }]
 )
-Millionsend::Contacts.get("ada@acme.dev") # by id or email
+Millionsend::Contacts.get("ada@acme.dev") # by id or email; also resend-ruby's get(id: ...) / get(email: ...)
 Millionsend::Contacts.update(id: contact[:id], unsubscribed: true, first_name: nil) # nil clears
 Millionsend::Contacts.remove("ada@acme.dev")
 Millionsend::Contacts.list(limit: 50)
 
-# Topic subscriptions (granular unsubscribe) — mirrors resend's contacts.topics.update
-Millionsend::Contacts.topics_update("ada@acme.dev", [{ id: topic_id, subscription: "opt_out" }])
+# Topic subscriptions (granular unsubscribe) — PATCH /contacts/:id/topics
+Millionsend::Contacts::Topics.update(email: "ada@acme.dev", topics: [{ id: topic_id, subscription: "opt_out" }]) # resend-ruby shape
+Millionsend::Contacts.topics_update("ada@acme.dev", [{ id: topic_id, subscription: "opt_out" }])                 # positional
 
-# Segment membership
-Millionsend::Contacts::Segments.add("ada@acme.dev", segment_id)    # POST   /contacts/:id/segments/:segment_id
-Millionsend::Contacts::Segments.remove("ada@acme.dev", segment_id) # DELETE /contacts/:id/segments/:segment_id
+# Segment membership — POST / DELETE /contacts/:id/segments/:segment_id
+Millionsend::Contacts::Segments.add("ada@acme.dev", segment_id)
+Millionsend::Contacts::Segments.remove(contact_id: contact[:id], segment_id: segment_id) # resend-ruby shape
 
 # Bulk create (MillionSend extension) — up to 1000 per call
 result = Millionsend::Contacts::Batch.create(
@@ -267,6 +268,9 @@ Millionsend::Templates.duplicate(tpl[:id]) # returns the copy's id
 Millionsend::Templates.remove(tpl[:id])
 ```
 
+Resend's `from`, `reply_to` and `variables` template fields are passed through untouched; the
+server currently answers 422 for them.
+
 ### Segments (MillionSend extension)
 
 Dynamic segments are a saved filter over the team's contacts — a MillionSend superset with
@@ -343,12 +347,14 @@ transport failures that never reached the API raise `ApplicationError` with `#st
 Method names, nesting and payloads match; `options: { idempotency_key:, batch_validation: }`
 works as in resend-ruby. Notes:
 
-- **Member methods take the id first.** `update` on domains, webhooks, templates, contact
-  properties, topics, broadcasts and segments is `update(id, params)` rather than a hash with
-  `:id`; `Contacts.update` keeps resend's single-hash shape, and `Emails.update` accepts both.
-- Resend's `Contacts.topics.update` becomes `Millionsend::Contacts.topics_update` (Ruby has no
-  nested-module method on a module function). `Contacts::Segments` and `Suppressions::Batch`
-  are nested modules as in resend-ruby.
+- **`update` takes the id first.** On domains, webhooks, contact properties, topics, broadcasts
+  and segments it is `update(id, params)` where resend-ruby takes one hash carrying the id
+  (`:id`, `:topic_id`, `:broadcast_id`, `:segment_id`); templates already match resend-ruby's
+  `update(id, params)`, `Contacts.update` keeps resend's single-hash shape, and `Emails.update`
+  accepts both.
+- `Contacts` member methods and `Contacts::Segments` / `Contacts::Topics` accept resend-ruby's
+  addressing hashes (`id:` / `email:` / `contact_id:`, `segment_id:`) as well as bare values.
+  `Suppressions::Batch` is nested as in resend-ruby.
 - **No audiences** — contacts are team-global, so there is no `Audiences` resource and no
   `audience_id` params. The API's `/audiences/*` routes are a compatibility shim and are not
   part of this SDK. `Millionsend::Segments` is the dynamic-filter feature (`/segments`), not

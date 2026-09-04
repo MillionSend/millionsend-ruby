@@ -20,9 +20,8 @@ module Millionsend
       # everything else is the body. A nil value clears a field; omit a key to
       # leave it unchanged.
       def update(params)
-        key = params[:email] || params[:id]
         body = params.reject { |k, _| [:id, :email].include?(k) }
-        Millionsend::Request.new(method: :patch, path: member_path(key), body: body).perform
+        Millionsend::Request.new(method: :patch, path: member_path(params), body: body).perform
       end
 
       # DELETE a contact by id or email.
@@ -38,13 +37,26 @@ module Millionsend
       end
 
       # PATCH /contacts/:id_or_email/topics with a bare array of
-      # { id:, subscription: }. Mirrors resend-ruby's contacts.topics.update.
+      # { id:, subscription: }. Contacts::Topics.update is the resend-ruby shape.
       def topics_update(id_or_email, topics)
         Millionsend::Request.new(method: :patch, path: "#{member_path(id_or_email)}/topics", body: topics).perform
       end
 
+      # Every member method also accepts resend-ruby's addressing hash
+      # ({ id: } / { email: } / { contact_id: }) in place of the bare value.
       def member_path(id_or_email)
+        id_or_email = id_or_email[:email] || id_or_email[:id] || id_or_email[:contact_id] if id_or_email.is_a?(Hash)
         "/contacts/#{Millionsend::Util.encode(id_or_email)}"
+      end
+    end
+
+    # Topic subscriptions of one contact, in resend-ruby's nested shape.
+    module Topics
+      class << self
+        # PATCH /contacts/:id_or_email/topics — { id: | email:, topics: [{ id:, subscription: }] }.
+        def update(params)
+          Millionsend::Contacts.topics_update(params, params[:topics])
+        end
       end
     end
 
@@ -72,19 +84,21 @@ module Millionsend
     # only applies to segments that hold an explicit member list.
     module Segments
       class << self
-        # POST /contacts/:id_or_email/segments/:segment_id
-        def add(id_or_email, segment_id)
+        # POST /contacts/:id_or_email/segments/:segment_id. Takes
+        # (id_or_email, segment_id) or resend-ruby's { contact_id: | email:, segment_id: }.
+        def add(id_or_email, segment_id = nil)
           Millionsend::Request.new(method: :post, path: path(id_or_email, segment_id)).perform
         end
 
-        # DELETE /contacts/:id_or_email/segments/:segment_id
-        def remove(id_or_email, segment_id)
+        # DELETE /contacts/:id_or_email/segments/:segment_id — same shapes as add.
+        def remove(id_or_email, segment_id = nil)
           Millionsend::Request.new(method: :delete, path: path(id_or_email, segment_id)).perform
         end
 
         private
 
         def path(id_or_email, segment_id)
+          segment_id ||= id_or_email[:segment_id] if id_or_email.is_a?(Hash)
           "#{Millionsend::Contacts.member_path(id_or_email)}/segments/#{Millionsend::Util.encode(segment_id)}"
         end
       end
