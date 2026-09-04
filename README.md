@@ -245,7 +245,7 @@ Millionsend::Webhooks.remove(hook[:id])
 
 Events: `email.sent`, `email.delivered`, `email.delivery_delayed`, `email.bounced`,
 `email.complained`, `email.opened`, `email.clicked`, `deliverability.warning`,
-`deliverability.paused`, `quota.warning`, `quota.reached`.
+`deliverability.paused`, `quota.warning`, `quota.reached`, `quota.paused`.
 
 ### API keys
 
