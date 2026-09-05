@@ -33,6 +33,13 @@ module Millionsend
       { limit: options[:limit], after: options[:after], before: options[:before] }
     end
 
+    # ?include= for the contact lists: the names comma-joined, or nil (dropped
+    # from the query) when none were given.
+    def include_query(include)
+      names = Array(include)
+      names.empty? ? nil : names.join(",")
+    end
+
     # Per-request options for the Request constructor. Both call shapes land in
     # the same trailing positional hash: the original `idempotency_key: "k"` and
     # resend-ruby's keyword form `options: { idempotency_key: "k" }`, so the

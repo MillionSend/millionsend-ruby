@@ -227,6 +227,18 @@ RSpec.describe "resource wiring" do
       expect(WebMock).to have_requested(:get, "https://api.test/contacts").with(query: { "after" => "cur" })
     end
 
+    it "list joins include: into one comma-separated query value and omits it when unset" do
+      stub_request(:get, "https://api.test/contacts")
+        .with(query: { "limit" => "100", "include" => "properties,topics" }).to_return(list_ok)
+      Millionsend::Contacts.list(limit: 100, include: ["properties", "topics"])
+      expect(WebMock).to have_requested(:get, "https://api.test/contacts")
+        .with(query: { "limit" => "100", "include" => "properties,topics" })
+
+      stub_request(:get, "https://api.test/contacts").to_return(list_ok)
+      Millionsend::Contacts.list(include: [])
+      expect(WebMock).to(have_requested(:get, "https://api.test/contacts") { |req| req.uri.query.nil? })
+    end
+
     it "topics_update patches /contacts/:id/topics with a bare array" do
       stub_request(:patch, "https://api.test/contacts/c1/topics").to_return(ok)
       Millionsend::Contacts.topics_update("c1", [{ id: "t1", subscription: "opt_out" }])
@@ -344,6 +356,39 @@ RSpec.describe "resource wiring" do
       expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch/remove")
         .with(body: { "emails" => ["a@x.dev"] })
       expect(res[:data]).to eq([{ object: "contact", contact: "c1", deleted: true }])
+    end
+
+    it "Batch.get posts ids and emails to /contacts/batch/get and returns data plus missing" do
+      stub_request(:post, "https://api.test/contacts/batch/get").to_return(ok(
+        '{"object":"list","data":[{"object":"contact","id":"c1","email":"a@x.dev","first_name":null,"last_name":null,' \
+        '"created_at":"2026-01-01T00:00:00.000Z","unsubscribed":false,' \
+        '"properties":{"plan":{"type":"string","value":"pro"},"seats":{"type":"number","value":3}},' \
+        '"topics":[{"id":"t1","name":"News","description":null,"subscription":"opt_in","explicit":false,"visibility":"public"}]}],' \
+        '"missing":[{"index":1,"email":"ghost@x.dev"},{"index":3,"id":"c4"}]}'
+      ))
+      res = Millionsend::Contacts::Batch.get(
+        ["c1", "ghost@x.dev", { email: "b@x.dev" }, { contact_id: "c4" }, { id: "c5" }],
+        include: ["properties", "topics"]
+      )
+      expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch/get").with(
+        body: {
+          "contacts" => [{ "id" => "c1" }, { "email" => "ghost@x.dev" }, { "email" => "b@x.dev" }, { "id" => "c4" }, { "id" => "c5" }],
+          "include" => ["properties", "topics"]
+        }
+      )
+      expect(res[:data].first).to include(object: "contact", id: "c1", email: "a@x.dev", unsubscribed: false)
+      expect(res[:data].first[:properties]).to eq(plan: { type: "string", value: "pro" }, seats: { type: "number", value: 3 })
+      expect(res[:data].first[:topics]).to eq([{ id: "t1", name: "News", description: nil, subscription: "opt_in",
+                                                 explicit: false, visibility: "public" }])
+      expect(res[:missing]).to eq([{ index: 1, email: "ghost@x.dev" }, { index: 3, id: "c4" }])
+    end
+
+    it "Batch.get leaves include out of the body when unset" do
+      stub_request(:post, "https://api.test/contacts/batch/get").to_return(ok('{"object":"list","data":[],"missing":[]}'))
+      res = Millionsend::Contacts::Batch.get([{ id: "c1" }])
+      expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch/get")
+        .with(body: { "contacts" => [{ "id" => "c1" }] })
+      expect(res).to eq(object: "list", data: [], missing: [])
     end
 
     it "Segments.add and .remove hit /contacts/:id/segments/:segment_id" do
@@ -492,6 +537,10 @@ RSpec.describe "resource wiring" do
       stub_request(:get, "https://api.test/segments/s1/contacts").with(query: { "limit" => "10" }).to_return(list_ok)
       Millionsend::Segments.contacts("s1", limit: 10)
       expect(WebMock).to have_requested(:get, "https://api.test/segments/s1/contacts").with(query: { "limit" => "10" })
+
+      stub_request(:get, "https://api.test/segments/s1/contacts").with(query: { "include" => "topics" }).to_return(list_ok)
+      Millionsend::Segments.contacts("s1", include: [:topics])
+      expect(WebMock).to have_requested(:get, "https://api.test/segments/s1/contacts").with(query: { "include" => "topics" })
 
       stub_request(:patch, "https://api.test/segments/s1").to_return(ok)
       Millionsend::Segments.update("s1", { name: "Renamed" })

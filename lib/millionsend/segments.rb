@@ -23,11 +23,12 @@ module Millionsend
       end
 
       # GET /segments/:id/contacts — the contacts currently matching, paginated
-      # with limit:/after:/before:.
+      # with limit:/after:/before:; include: (["properties", "topics"]) as on
+      # Contacts.list.
       def contacts(id, options = {})
+        query = Millionsend::Util.list_query(options).merge(include: Millionsend::Util.include_query(options[:include]))
         Millionsend::Request.new(
-          method: :get, path: "/segments/#{Millionsend::Util.encode(id)}/contacts",
-          query: Millionsend::Util.list_query(options)
+          method: :get, path: "/segments/#{Millionsend::Util.encode(id)}/contacts", query: query
         ).perform
       end
 

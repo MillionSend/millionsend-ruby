@@ -29,11 +29,12 @@ module Millionsend
         Millionsend::Request.new(method: :delete, path: member_path(id_or_email)).perform
       end
 
-      # GET /contacts — accepts limit:/after:/before:.
+      # GET /contacts — accepts limit:/after:/before: and include:
+      # (["properties", "topics"]) to carry the property map and the topic
+      # subscriptions on every item, as Contacts.get and Topics.list return them.
       def list(options = {})
-        Millionsend::Request.new(
-          method: :get, path: "/contacts", query: Millionsend::Util.list_query(options)
-        ).perform
+        query = Millionsend::Util.list_query(options).merge(include: Millionsend::Util.include_query(options[:include]))
+        Millionsend::Request.new(method: :get, path: "/contacts", query: query).perform
       end
 
       # PATCH /contacts/:id_or_email/topics with a bare array of
@@ -53,8 +54,20 @@ module Millionsend
       # Every member method also accepts resend-ruby's addressing hash
       # ({ id: } / { email: } / { contact_id: }) in place of the bare value.
       def member_path(id_or_email)
-        id_or_email = id_or_email[:email] || id_or_email[:id] || id_or_email[:contact_id] if id_or_email.is_a?(Hash)
-        "/contacts/#{Millionsend::Util.encode(id_or_email)}"
+        "/contacts/#{Millionsend::Util.encode(unwrap(id_or_email))}"
+      end
+
+      # One /contacts/batch/get entry. The wire wants { id: } and { email: }
+      # told apart, and only an email carries "@".
+      def address(id_or_email)
+        value = unwrap(id_or_email)
+        value.to_s.include?("@") ? { email: value } : { id: value }
+      end
+
+      private
+
+      def unwrap(id_or_email)
+        id_or_email.is_a?(Hash) ? id_or_email[:email] || id_or_email[:id] || id_or_email[:contact_id] : id_or_email
       end
     end
 
@@ -94,6 +107,17 @@ module Millionsend
             query: { on_conflict: options[:on_conflict] },
             **Millionsend::Util.request_options(options)
           ).perform
+        end
+
+        # POST /contacts/batch/get — up to 1000 contacts by id or email (bare
+        # values or addressing hashes, like Contacts.get) in one request, one
+        # call against the rate limit. Returns { data: [...] } in request order
+        # plus missing: [{ index:, id: | email: }] for the entries that matched
+        # nobody — those never fail the call. include: ["properties", "topics"]
+        # attaches the same extras as Contacts.list.
+        def get(addresses, options = {})
+          body = { contacts: addresses.map { |a| Millionsend::Contacts.address(a) }, include: options[:include] }
+          Millionsend::Request.new(method: :post, path: "/contacts/batch/get", body: body.compact).perform
         end
 
         # POST /contacts/batch/remove — { ids: [...] } or { emails: [...] }

@@ -123,6 +123,9 @@ Millionsend::Contacts.get("ada@acme.dev") # by id or email; also resend-ruby's g
 Millionsend::Contacts.update(id: contact[:id], unsubscribed: true, first_name: nil) # nil clears
 Millionsend::Contacts.remove("ada@acme.dev")
 Millionsend::Contacts.list(limit: 50)
+# Bulk read (MillionSend extension): carry the property map and the topic subscriptions on every
+# item, so an audience reads in one request per 100 contacts instead of one per contact
+Millionsend::Contacts.list(limit: 100, include: ["properties", "topics"]) # ?include=properties,topics
 
 # Topic subscriptions (granular unsubscribe) — PATCH /contacts/:id/topics
 Millionsend::Contacts::Topics.update(email: "ada@acme.dev", topics: [{ id: topic_id, subscription: "opt_out" }]) # resend-ruby shape
@@ -148,6 +151,12 @@ result = Millionsend::Contacts::Batch.create(
 result[:data]   # [{ index:, id:, status: "created" | "updated" | "skipped" }]
 result[:counts] # { created:, updated:, skipped:, failed: }
 result[:errors] # permissive mode only: [{ index:, message: }]
+
+# Bulk lookup (MillionSend extension) — up to 1000 contacts by id or email in one request, in
+# request order; unknown entries are listed, not errors — one request against the rate limit
+found = Millionsend::Contacts::Batch.get([contact[:id], "b@acme.dev", { email: "c@acme.dev" }], include: ["topics"])
+found[:data]    # [{ object: "contact", id:, email:, first_name:, last_name:, created_at:, unsubscribed:, topics: }]
+found[:missing] # [{ index:, email: }] / [{ index:, id: }] — request entries that matched nobody
 
 # Bulk delete (MillionSend extension) — up to 1000 per call, exactly one of ids: / emails:
 Millionsend::Contacts::Batch.remove(emails: ["a@acme.dev", "b@acme.dev"]) # or ids: [...]
@@ -307,6 +316,7 @@ segment = Millionsend::Segments.create(
 Millionsend::Segments.get(segment[:id]) # includes a live contact_count
 Millionsend::Segments.list
 Millionsend::Segments.contacts(segment[:id], limit: 50) # the contacts currently matching
+Millionsend::Segments.contacts(segment[:id], include: ["properties", "topics"]) # with each contact's extras, as Contacts.list
 Millionsend::Segments.update(segment[:id], name: "Pro tier")
 Millionsend::Segments.remove(segment[:id])
 ```
