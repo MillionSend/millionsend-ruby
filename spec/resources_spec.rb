@@ -227,6 +227,18 @@ RSpec.describe "resource wiring" do
       expect(WebMock).to have_requested(:get, "https://api.test/contacts").with(query: { "after" => "cur" })
     end
 
+    it "remove sends ?erase=true when asked, flat or in the addressing hash, and no query otherwise" do
+      stub_request(:delete, "https://api.test/contacts/c1").with(query: { "erase" => "true" }).to_return(ok)
+      Millionsend::Contacts.remove("c1", erase: true)
+      Millionsend::Contacts.remove(id: "c1", erase: true)
+      expect(WebMock).to have_requested(:delete, "https://api.test/contacts/c1").with(query: { "erase" => "true" }).twice
+
+      stub_request(:delete, "https://api.test/contacts/c1").to_return(ok)
+      Millionsend::Contacts.remove("c1")
+      Millionsend::Contacts.remove(id: "c1")
+      expect(WebMock).to(have_requested(:delete, "https://api.test/contacts/c1").with { |req| req.uri.query.nil? }.twice)
+    end
+
     it "list joins include: into one comma-separated query value and omits it when unset" do
       stub_request(:get, "https://api.test/contacts")
         .with(query: { "limit" => "100", "include" => "properties,topics" }).to_return(list_ok)
@@ -351,10 +363,13 @@ RSpec.describe "resource wiring" do
         .to_return(ok('{"data":[{"object":"contact","contact":"c1","deleted":true}]}'))
       res = Millionsend::Contacts::Batch.remove({ ids: ["c1", "c2"] })
       Millionsend::Contacts::Batch.remove({ emails: ["a@x.dev"] })
+      Millionsend::Contacts::Batch.remove(emails: ["b@x.dev"], erase: true)
       expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch/remove")
         .with(body: { "ids" => ["c1", "c2"] })
       expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch/remove")
         .with(body: { "emails" => ["a@x.dev"] })
+      expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch/remove")
+        .with(body: { "emails" => ["b@x.dev"], "erase" => true })
       expect(res[:data]).to eq([{ object: "contact", contact: "c1", deleted: true }])
     end
 

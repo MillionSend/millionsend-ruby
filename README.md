@@ -121,7 +121,9 @@ contact = Millionsend::Contacts.create(
 )
 Millionsend::Contacts.get("ada@acme.dev") # by id or email; also resend-ruby's get(id: ...) / get(email: ...)
 Millionsend::Contacts.update(id: contact[:id], unsubscribed: true, first_name: nil) # nil clears
-Millionsend::Contacts.remove("ada@acme.dev")
+Millionsend::Contacts.remove("ada@acme.dev")              # the contact's emails stay in the send log
+Millionsend::Contacts.remove("ada@acme.dev", erase: true) # ?erase=true — also scrubs the address from email
+                                                          # history, event payloads and API logs (GDPR/LGPD)
 Millionsend::Contacts.list(limit: 50)
 # Bulk read (MillionSend extension): carry the property map and the topic subscriptions on every
 # item, so an audience reads in one request per 100 contacts instead of one per contact
@@ -159,7 +161,8 @@ found[:data]    # [{ object: "contact", id:, email:, first_name:, last_name:, cr
 found[:missing] # [{ index:, email: }] / [{ index:, id: }] — request entries that matched nobody
 
 # Bulk delete (MillionSend extension) — up to 1000 per call, exactly one of ids: / emails:
-Millionsend::Contacts::Batch.remove(emails: ["a@acme.dev", "b@acme.dev"]) # or ids: [...]
+Millionsend::Contacts::Batch.remove(emails: ["a@acme.dev", "b@acme.dev"]) # or ids: [...]; emails stay in the log
+Millionsend::Contacts::Batch.remove(ids: [contact[:id]], erase: true)      # also scrubs each address, as Contacts.remove
 # => { data: [{ object: "contact", contact: "<uuid>", deleted: true }, ...] } — only the rows actually deleted
 ```
 

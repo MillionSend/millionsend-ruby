@@ -24,9 +24,13 @@ module Millionsend
         Millionsend::Request.new(method: :patch, path: member_path(params), body: body).perform
       end
 
-      # DELETE a contact by id or email.
-      def remove(id_or_email)
-        Millionsend::Request.new(method: :delete, path: member_path(id_or_email)).perform
+      # DELETE a contact by id or email. The contact's emails stay in the send
+      # log; erase: true also scrubs the address from email history, event
+      # payloads and API logs (a GDPR/LGPD erasure). The flag rides flat or in
+      # resend-ruby's addressing hash: remove(email: "a@x.dev", erase: true).
+      def remove(id_or_email, options = {})
+        erase = options.key?(:erase) ? options[:erase] : (id_or_email[:erase] if id_or_email.is_a?(Hash))
+        Millionsend::Request.new(method: :delete, path: member_path(id_or_email), query: { erase: erase }).perform
       end
 
       # GET /contacts — accepts limit:/after:/before: and include:
@@ -121,7 +125,9 @@ module Millionsend
         end
 
         # POST /contacts/batch/remove — { ids: [...] } or { emails: [...] }
-        # (exactly one, up to 1000). Returns { data: [{ object:, contact:,
+        # (exactly one, up to 1000), plus erase: true to also scrub each
+        # address from email history, event payloads and API logs, as
+        # Contacts.remove does. Returns { data: [{ object:, contact:,
         # deleted: true }] } listing only the rows actually deleted; unknown
         # ids or addresses are skipped.
         def remove(params)
