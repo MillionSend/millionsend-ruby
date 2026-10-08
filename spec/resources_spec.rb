@@ -242,7 +242,7 @@ RSpec.describe "resource wiring" do
     it "list joins include: into one comma-separated query value and omits it when unset" do
       stub_request(:get, "https://api.test/contacts")
         .with(query: { "limit" => "100", "include" => "properties,topics" }).to_return(list_ok)
-      Millionsend::Contacts.list(limit: 100, include: ["properties", "topics"])
+      Millionsend::Contacts.list(limit: 100, include: %w[properties topics])
       expect(WebMock).to have_requested(:get, "https://api.test/contacts")
         .with(query: { "limit" => "100", "include" => "properties,topics" })
 
@@ -361,11 +361,11 @@ RSpec.describe "resource wiring" do
     it "Batch.remove posts ids or emails to /contacts/batch/remove" do
       stub_request(:post, "https://api.test/contacts/batch/remove")
         .to_return(ok('{"data":[{"object":"contact","contact":"c1","deleted":true}]}'))
-      res = Millionsend::Contacts::Batch.remove({ ids: ["c1", "c2"] })
+      res = Millionsend::Contacts::Batch.remove({ ids: %w[c1 c2] })
       Millionsend::Contacts::Batch.remove({ emails: ["a@x.dev"] })
       Millionsend::Contacts::Batch.remove(emails: ["b@x.dev"], erase: true)
       expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch/remove")
-        .with(body: { "ids" => ["c1", "c2"] })
+        .with(body: { "ids" => %w[c1 c2] })
       expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch/remove")
         .with(body: { "emails" => ["a@x.dev"] })
       expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch/remove")
@@ -383,12 +383,12 @@ RSpec.describe "resource wiring" do
       ))
       res = Millionsend::Contacts::Batch.get(
         ["c1", "ghost@x.dev", { email: "b@x.dev" }, { contact_id: "c4" }, { id: "c5" }],
-        include: ["properties", "topics"]
+        include: %w[properties topics]
       )
       expect(WebMock).to have_requested(:post, "https://api.test/contacts/batch/get").with(
         body: {
           "contacts" => [{ "id" => "c1" }, { "email" => "ghost@x.dev" }, { "email" => "b@x.dev" }, { "id" => "c4" }, { "id" => "c5" }],
-          "include" => ["properties", "topics"]
+          "include" => %w[properties topics],
         }
       )
       expect(res[:data].first).to include(object: "contact", id: "c1", email: "a@x.dev", unsubscribed: false)
@@ -537,7 +537,7 @@ RSpec.describe "resource wiring" do
       expect(WebMock).to have_requested(:post, "https://api.test/segments").with(
         body: {
           "name" => "Active",
-          "filter" => { "match" => "all", "conditions" => [{ "field" => "email", "op" => "is_set", "value" => nil }] }
+          "filter" => { "match" => "all", "conditions" => [{ "field" => "email", "op" => "is_set", "value" => nil }] },
         }
       )
 
@@ -607,11 +607,11 @@ RSpec.describe "resource wiring" do
 
       stub_request(:post, "https://api.test/suppressions/batch/remove").to_return(ok('{"data":[]}'))
       Millionsend::Suppressions::Batch.remove({ emails: ["a@x.dev"] })
-      Millionsend::Suppressions::Batch.remove({ ids: ["sup1", "sup2"] })
+      Millionsend::Suppressions::Batch.remove({ ids: %w[sup1 sup2] })
       expect(WebMock).to have_requested(:post, "https://api.test/suppressions/batch/remove")
         .with(body: { "emails" => ["a@x.dev"] })
       expect(WebMock).to have_requested(:post, "https://api.test/suppressions/batch/remove")
-        .with(body: { "ids" => ["sup1", "sup2"] })
+        .with(body: { "ids" => %w[sup1 sup2] })
     end
   end
 
