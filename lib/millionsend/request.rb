@@ -23,7 +23,7 @@ module Millionsend
     # (WebMock::NetConnectNotAllowedError) is not swallowed as a transport error.
     TRANSPORT_ERRORS = [
       Timeout::Error, SocketError, SystemCallError, IOError,
-      Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError
+      Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError,
     ].freeze
 
     def initialize(method:, path:, body: nil, query: nil, idempotency_key: nil, batch_validation: nil)

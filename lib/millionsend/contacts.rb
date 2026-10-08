@@ -20,7 +20,7 @@ module Millionsend
       # everything else is the body. A nil value clears a field; omit a key to
       # leave it unchanged.
       def update(params)
-        body = params.reject { |k, _| [:id, :email].include?(k) }
+        body = params.reject { |k, _| %i[id email].include?(k) }
         Millionsend::Request.new(method: :patch, path: member_path(params), body: body).perform
       end
 
