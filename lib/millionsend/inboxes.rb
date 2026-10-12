@@ -176,18 +176,23 @@ module Millionsend
       # The messages of one thread.
       module Emails
         class << self
-          # GET .../threads/:thread_id/emails — limit:/after:/before:. Oldest
-          # first; after: pages toward newer.
+          # GET .../threads/:thread_id/emails — limit:/after:/before: and
+          # include_quarantined: (full-access team keys). Oldest first; after:
+          # pages toward newer.
           def list(inbox_id, thread_id, options = {})
             Millionsend::Request.new(
               method: :get, path: "#{Threads.member_path(inbox_id, thread_id)}/emails",
-              query: Millionsend::Util.list_query(options)
+              query: Millionsend::Util.csv_query(options)
             ).perform
           end
 
-          # GET .../threads/:thread_id/emails/:email_id
-          def get(inbox_id, thread_id, email_id)
-            Millionsend::Request.new(method: :get, path: member_path(inbox_id, thread_id, email_id)).perform
+          # GET .../threads/:thread_id/emails/:email_id — include_quarantined:
+          # (full-access team keys) reads a held message.
+          def get(inbox_id, thread_id, email_id, options = {})
+            Millionsend::Request.new(
+              method: :get, path: member_path(inbox_id, thread_id, email_id),
+              query: { include_quarantined: options[:include_quarantined] }
+            ).perform
           end
 
           # POST .../emails/:email_id/reply — html/text, cc, bcc, subject,

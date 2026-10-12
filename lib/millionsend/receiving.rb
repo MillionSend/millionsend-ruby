@@ -13,7 +13,8 @@ module Millionsend
         # created_at: }] for matches held since the cursor), since:,
         # inbox_id:, to:, from: (an
         # address, or a domain covering its subdomains), subject_contains:,
-        # unread: (with inbox_id:) and include_quarantined: (full-access keys).
+        # unread: (with inbox_id:), include_quarantined: and quarantined: (held
+        # mail too, or only; full-access keys).
         def list(options = {})
           Millionsend::Request.new(
             method: :get, path: "/emails/receiving", query: Millionsend::Util.csv_query(options)

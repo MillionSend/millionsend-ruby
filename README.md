@@ -126,7 +126,7 @@ Millionsend::Emails::Receiving.remove(id)                           # erase now 
 # Long-poll: wait up to 50 s for the next match
 page = Millionsend::Emails::Receiving.list(inbox_id: inbox[:id], from: "github.com", wait: 30)
 page[:data] # what arrived
-page[:held] # [{ id:, inbox_id:, reason:, created_at: }] — matches held for screening or quarantine
+page[:held] # [{ id:, inbox_id:, reason:, quarantine_reason:, created_at: }] — matches held for screening or quarantine
 
 # Reply and forward from the server, threaded
 res = Millionsend::Emails::Receiving.reply(id, { text: "Thanks!" }, idempotency_key: "reply-#{id}")
@@ -135,8 +135,9 @@ res = Millionsend::Emails::Receiving.forward(id, { to: "ops@acme.dev", mode: "at
 
 List options go on the query as given: `limit`, `after`, `before`, `wait` (0–50), `since`,
 `inbox_id`, `to`, `from` (an address, or a domain covering its subdomains), `subject_contains`,
-`unread` (with `inbox_id`) and `include_quarantined` (full-access keys). `reply` also takes `subject`,
-`cc`, `bcc`, `reply_all`, `requires_approval`, `from` and `inbox_id`.
+`unread` (with `inbox_id`), and `include_quarantined` or `quarantined` (held mail too, or only;
+full-access keys). `reply` also takes `subject`, `cc`, `bcc`, `reply_all`, `requires_approval`,
+`from` and `inbox_id`.
 
 `reply` and `forward` return `{ kind: "sent", data: { object: "email", id:, thread_id:, inbox_id: } }`,
 or `{ kind: "draft", data: <draft> }` when an inbox's rules hold the message for a person to
@@ -175,7 +176,7 @@ Millionsend::Inboxes::Threads.search(inbox[:id], query: "invoice", from: ["strip
 Millionsend::Inboxes::Threads.get(inbox[:id], thread_id)
 Millionsend::Inboxes::Threads.update(inbox[:id], thread_id, read: true, folder: "archive", label_id: label_id)
 Millionsend::Inboxes::Threads.remove(inbox[:id], thread_id) # to trash, purged after 30 days
-Millionsend::Inboxes::Threads::Emails.list(inbox[:id], thread_id) # oldest first
+Millionsend::Inboxes::Threads::Emails.list(inbox[:id], thread_id) # oldest first; include_quarantined: true for held mail too
 Millionsend::Inboxes::Threads::Emails.get(inbox[:id], thread_id, email_id)
 res = Millionsend::Inboxes::Threads::Emails.reply(inbox[:id], thread_id, email_id, { text: "On it." }, idempotency_key: "k1")
 Millionsend::Inboxes::Threads::Emails.forward(inbox[:id], thread_id, email_id, { to: "ops@acme.dev" })

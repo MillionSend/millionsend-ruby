@@ -815,7 +815,8 @@ RSpec.describe "resource wiring" do
                 "inbox_id" => "i1", "to" => "bot@x.dev", "from" => "stripe.com", "subject_contains" => "code",
                 "unread" => "true", "include_quarantined" => "true" }
       body = { object: "list", has_more: false, data: [],
-               held: [{ id: "r1", inbox_id: "i1", reason: "not_allowlisted", created_at: "2026-10-12T10:00:00.000Z" }] }
+               held: [{ id: "r1", inbox_id: "i1", reason: "quarantined", quarantine_reason: "not_allowlisted",
+                        created_at: "2026-10-12T10:00:00.000Z" }] }
       stub_request(:get, "https://api.test/emails/receiving").with(query: query).to_return(ok(JSON.generate(body)))
 
       res = Millionsend::Emails::Receiving.list(limit: 10, before: "r0", wait: 30, since: "2026-10-12T00:00:00Z",
@@ -1022,9 +1023,10 @@ RSpec.describe "resource wiring" do
     end
 
     it "Threads::Emails list/get/reply/forward, a reply held as a draft included" do
-      stub_request(:get, "https://api.test/inboxes/i1/threads/t1/emails").with(query: { "after" => "m1" }).to_return(list_ok)
-      Millionsend::Inboxes::Threads::Emails.list("i1", "t1", after: "m1")
-      expect(WebMock).to have_requested(:get, "https://api.test/inboxes/i1/threads/t1/emails").with(query: { "after" => "m1" })
+      query = { "after" => "m1", "include_quarantined" => "true" }
+      stub_request(:get, "https://api.test/inboxes/i1/threads/t1/emails").with(query: query).to_return(list_ok)
+      Millionsend::Inboxes::Threads::Emails.list("i1", "t1", after: "m1", include_quarantined: true)
+      expect(WebMock).to have_requested(:get, "https://api.test/inboxes/i1/threads/t1/emails").with(query: query)
 
       email = { id: "m1", direction: "inbound", from: "Ada <ada@x.dev>", to: ["bot@acme.dev"], cc: [], bcc: [], reply_to: [],
                 subject: "Hi", message_id: "<a@x.dev>", html: nil, text: "Hello", attachments: [{ id: "a1", filename: nil, size: nil }],
@@ -1034,6 +1036,12 @@ RSpec.describe "resource wiring" do
                              injection_score: nil, phishing_score: nil, hidden_text_removed: false } }
       stub_request(:get, "https://api.test/inboxes/i1/threads/t1/emails/m1").to_return(ok(JSON.generate(email)))
       expect(Millionsend::Inboxes::Threads::Emails.get("i1", "t1", "m1")).to eq(email)
+      expect(WebMock).to have_requested(:get, "https://api.test/inboxes/i1/threads/t1/emails/m1").with(query: {})
+      stub_request(:get, "https://api.test/inboxes/i1/threads/t1/emails/m1").with(query: { "include_quarantined" => "true" })
+                                                                            .to_return(ok(JSON.generate(email)))
+      Millionsend::Inboxes::Threads::Emails.get("i1", "t1", "m1", include_quarantined: true)
+      expect(WebMock).to have_requested(:get, "https://api.test/inboxes/i1/threads/t1/emails/m1")
+        .with(query: { "include_quarantined" => "true" })
 
       sent = email.merge(id: "m2", direction: "outbound", read: true, email_id: "m2", thread_id: "t1", inbox_id: "i1", status: "queued")
       stub_request(:post, "https://api.test/inboxes/i1/threads/t1/emails/m1/reply").to_return(ok(JSON.generate(sent)))
