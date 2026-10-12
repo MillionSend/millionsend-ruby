@@ -9,8 +9,9 @@ module Millionsend
       class << self
         # GET /emails/receiving. Options go on the query as given: limit:,
         # after:, before:, plus wait: (long-poll up to 50 s; the answer then
-        # also lists held: [{ id:, inbox_id:, reason:, created_at: }] for
-        # matches held since the cursor), since:, inbox_id:, to:, from: (an
+        # also lists held: [{ id:, inbox_id:, reason:, quarantine_reason:,
+        # created_at: }] for matches held since the cursor), since:,
+        # inbox_id:, to:, from: (an
         # address, or a domain covering its subdomains), subject_contains:,
         # unread: (with inbox_id:) and include_quarantined: (full-access keys).
         def list(options = {})

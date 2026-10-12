@@ -75,6 +75,12 @@ module Millionsend
     end
 
     def build_uri
+      # URL normalization resolves an empty, "." or ".." segment away, so an id
+      # such as ".." would send the request to another resource
+      # (DELETE /inboxes/{id}/labels/.. deletes the inbox).
+      dot = @path.split("/", -1).drop(1).any? { |segment| ["", ".", ".."].include?(segment) }
+      raise ArgumentError, 'an id in the request path is empty, "." or ".."' if dot
+
       base = Millionsend.base_url.to_s.sub(%r{/+\z}, "")
       uri = URI.parse("#{base}#{@path}")
       if !Millionsend.allow_insecure_http && Millionsend::Util.insecure_http?(uri)

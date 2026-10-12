@@ -190,6 +190,19 @@ RSpec.describe Millionsend do
       end
     end
 
+    it "never sends a path an empty, \".\" or \"..\" id would turn into another resource's" do
+      stub_request(:delete, "https://api.test/inboxes/ib1/labels/...").to_return(status: 200, body: "{}")
+
+      [
+        -> { Millionsend::Inboxes::Labels.remove("ib1", "..") },
+        -> { Millionsend::Inboxes::Threads.remove("ib1", ".") },
+        -> { Millionsend::Emails.get("") },
+      ].each { |call| expect(&call).to raise_error(ArgumentError, /empty/) }
+      expect(a_request(:any, /api\.test/)).not_to have_been_made
+      Millionsend::Inboxes::Labels.remove("ib1", "...")
+      expect(a_request(:delete, "https://api.test/inboxes/ib1/labels/...")).to have_been_made
+    end
+
     it "raises ApplicationError with a stable name when no API key is configured" do
       Millionsend.api_key = nil
       with_env("MILLIONSEND_API_KEY" => nil) do
