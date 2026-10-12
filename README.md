@@ -66,8 +66,8 @@ leave it unchanged.
 
 ## Request options
 
-`Emails.send`, `Batch.send` and `Contacts::Batch.create` take a trailing options hash, in
-either of two shapes:
+`Emails.send`, `Batch.send`, `Contacts::Batch.create` and the receiving and inbox replies,
+forwards and `Drafts.send` take a trailing options hash, in either of two shapes:
 
 ```ruby
 Millionsend::Emails.send(payload, idempotency_key: "order-42")               # flat
@@ -107,6 +107,101 @@ The send payload accepts `from`, `to`, `subject`, `html`, `text`, `cc`, `bcc`, `
 `reply_to` accept either a string or an array. `Emails.create` is an alias of `Emails.send`
 (as is `Batch.create`), mirroring Resend. `Emails.update` also takes resend-ruby's single
 hash: `Emails.update(email_id: id, scheduled_at: ...)`.
+
+### Receiving
+
+Mail your domains receive: Resend's `Emails::Receiving` plus MillionSend's long-poll, server-side
+reply and forward, and erase. Inbox-scoped keys never see mail held for screening or in quarantine.
+
+```ruby
+page  = Millionsend::Emails::Receiving.list(limit: 20)             # GET /emails/receiving
+email = Millionsend::Emails::Receiving.get(id, html_format: "cid")  # GET /emails/receiving/:id
+email[:extracted_text] # the visible text: hidden text and invisible characters removed
+email[:screening]      # { verdict:, sender_trust:, quarantine_reason:, injection_score:, ... }
+email[:extracted]      # { kinds:, code:, link:, ... } on verification mail
+Millionsend::Emails::Receiving::Attachments.list(id)                # each with a signed download_url (1 hour)
+Millionsend::Emails::Receiving::Attachments.get(id, attachment_id)  # also get(email_id:, id:) as in resend-ruby
+Millionsend::Emails::Receiving.remove(id)                           # erase now (full-access keys)
+
+# Long-poll: wait up to 50 s for the next match
+page = Millionsend::Emails::Receiving.list(inbox_id: inbox[:id], from: "github.com", wait: 30)
+page[:data] # what arrived
+page[:held] # [{ id:, inbox_id:, reason:, created_at: }] — matches held for screening or quarantine
+
+# Reply and forward from the server, threaded
+res = Millionsend::Emails::Receiving.reply(id, { text: "Thanks!" }, idempotency_key: "reply-#{id}")
+res = Millionsend::Emails::Receiving.forward(id, { to: "ops@acme.dev", mode: "attachment" }) # the original as an .eml
+```
+
+List options go on the query as given: `limit`, `after`, `before`, `wait` (0–50), `since`,
+`inbox_id`, `to`, `from` (an address, or a domain covering its subdomains), `subject_contains`,
+`unread` (with `inbox_id`) and `include_quarantined` (full-access keys). `reply` also takes `subject`,
+`cc`, `bcc`, `reply_all`, `requires_approval`, `from` and `inbox_id`.
+
+`reply` and `forward` return `{ kind: "sent", data: { object: "email", id:, thread_id:, inbox_id: } }`,
+or `{ kind: "draft", data: <draft> }` when an inbox's rules hold the message for a person to
+approve (HTTP 202); the draft's `approval_reasons` say why.
+
+### Inboxes (beta)
+
+Addresses whose mail lands in threads, for an agent (`kind: "agent"`, the default: screening, code
+extraction and send rules on) or for people (`kind: "human"`). Mirrors Resend's Inboxes beta;
+`Safety`, `Codes` and `Quarantine` are MillionSend extensions.
+
+```ruby
+inbox = Millionsend::Inboxes.create(name: "Signup bot", expires_in: "24h") # a random address on the shared domain
+inbox = Millionsend::Inboxes.create(email_address: "support@acme.dev", kind: "human")
+Millionsend::Inboxes.list(kind: "agent")
+Millionsend::Inboxes.get("support@acme.dev") # by id or address
+Millionsend::Inboxes.update(inbox[:id], name: "Support", from_name: "Acme Support", expires_in: nil) # nil: never expires
+Millionsend::Inboxes.remove(inbox[:id]) # also revokes its inbox-scoped keys
+
+# Safety rules: who may write in and what an agent may send
+Millionsend::Inboxes::Safety.get(inbox[:id])
+Millionsend::Inboxes::Safety.update(inbox[:id], accept_from: "allowlist", allowlist: ["*@stripe.com"], send_cap: nil)
+
+# Verification codes and sign-in links (links are never fetched); waits up to 50 s
+code = Millionsend::Inboxes::Codes.latest(inbox[:id], from: "github.com", wait: 30, max_age: 600)
+code[:status] # "found" | "none" | "ambiguous" | "timeout"
+code[:code]   # "482913", or code[:url] for a sign-in link
+
+# Quarantine: held mail is kept and listed; agents see it only once a person releases it
+Millionsend::Inboxes::Quarantine.list(inbox[:id])
+Millionsend::Inboxes::Quarantine.release(inbox[:id], email_id, trust_sender: true) # also allowlists the sender
+
+# Threads and their messages
+Millionsend::Inboxes::Threads.list(inbox[:id], folders: ["inbox", "archive"], read: false)
+Millionsend::Inboxes::Threads.search(inbox[:id], query: "invoice", from: ["stripe.com"])
+Millionsend::Inboxes::Threads.get(inbox[:id], thread_id)
+Millionsend::Inboxes::Threads.update(inbox[:id], thread_id, read: true, folder: "archive", label_id: label_id)
+Millionsend::Inboxes::Threads.remove(inbox[:id], thread_id) # to trash, purged after 30 days
+Millionsend::Inboxes::Threads::Emails.list(inbox[:id], thread_id) # oldest first
+Millionsend::Inboxes::Threads::Emails.get(inbox[:id], thread_id, email_id)
+res = Millionsend::Inboxes::Threads::Emails.reply(inbox[:id], thread_id, email_id, { text: "On it." }, idempotency_key: "k1")
+Millionsend::Inboxes::Threads::Emails.forward(inbox[:id], thread_id, email_id, { to: "ops@acme.dev" })
+
+# Labels
+label = Millionsend::Inboxes::Labels.create(inbox[:id], name: "Billing", color: "#FFAA00")
+Millionsend::Inboxes::Labels.list(inbox[:id])
+Millionsend::Inboxes::Labels.update(inbox[:id], label[:id], name: "Invoices")
+Millionsend::Inboxes::Labels.remove(inbox[:id], label[:id])
+
+# Drafts
+draft = Millionsend::Inboxes::Drafts.create(inbox[:id], to: ["ada@x.dev"], subject: "Hello", text: "Hi Ada")
+Millionsend::Inboxes::Drafts.list(inbox[:id])
+Millionsend::Inboxes::Drafts.get(inbox[:id], draft[:id])
+Millionsend::Inboxes::Drafts.update(inbox[:id], draft[:id], subject: nil) # nil clears
+Millionsend::Inboxes::Drafts.send(inbox[:id], draft[:id], idempotency_key: "draft-1")
+Millionsend::Inboxes::Drafts.reject(inbox[:id], draft[:id]) # approvers only
+Millionsend::Inboxes::Drafts.remove(inbox[:id], draft[:id])
+```
+
+Thread replies, forwards and `Drafts.send` return `{ kind: "sent", data: ... }`, or
+`{ kind: "draft", data: <draft> }` when the inbox's rules hold the message for approval. An
+inbox-scoped key or an MCP token cannot send a draft that waits for approval
+(`approval_required`); a person in the dashboard or a full-access team key can. Arrays in list and
+search options (`folders`, `labels`, `from`, `to`, `cc`, `bcc`) go out as one comma-separated value.
+Resend's hosted agent settings (`/inboxes/:id/agent`) are not exposed: MillionSend runs no agent.
 
 ### Contacts
 
@@ -246,6 +341,7 @@ Millionsend::Domains.get(domain[:id])
 Millionsend::Domains.list
 Millionsend::Domains.verify(domain[:id]) # re-check DNS now
 Millionsend::Domains.update(domain[:id], open_tracking: false, click_tracking: true, tracking_subdomain: nil) # nil clears
+Millionsend::Domains.update(domain[:id], receiving_catch_all: true) # keep mail to addresses without an inbox (paid plans on Cloud)
 Millionsend::Domains.remove(domain[:id])
 ```
 
@@ -261,6 +357,7 @@ hook[:signing_secret]
 Millionsend::Webhooks.get(hook[:id]) # also returns signing_secret and previous_secret_expires_at
 Millionsend::Webhooks.list
 Millionsend::Webhooks.update(hook[:id], events: ["email.opened"], status: "disabled")
+Millionsend::Webhooks.update(hook[:id], inbox_ids: [inbox[:id]]) # inbox events for these inboxes only; nil: every inbox
 Millionsend::Webhooks.remove(hook[:id])
 
 # Rotate the signing secret (MillionSend extension) — POST /webhooks/:id/rotate
@@ -278,13 +375,20 @@ Events: `email.sent`, `email.delivered`, `email.delivery_delayed`, `email.bounce
 `email.complained`, `email.opened`, `email.clicked`, `contact.created`, `contact.updated`,
 `contact.deleted`, `contact.unsubscribed`, `contact.resubscribed`, `contact.topic_opt_in`,
 `contact.topic_opt_out`, `suppression.added`, `suppression.removed`, `deliverability.warning`,
-`deliverability.paused`, `quota.warning`, `quota.reached`, `quota.paused`.
+`deliverability.paused`, `quota.warning`, `quota.reached`, `quota.paused`, `email.received`, and
+the inbox events `inbox.created`, `inbox.updated`, `inbox.deleted`, `inbox.expired`,
+`inbox.thread.created`, `inbox.thread.folder.updated`, `inbox.thread.labels.updated`,
+`inbox.email.received`, `inbox.email.sent`, `inbox.email.quarantined`, `inbox.draft.created`,
+`inbox.draft.updated`, `inbox.draft.sent`, `inbox.draft.deleted`. Inbox events are opt-in: an
+endpoint gets them only when its `events` list names them.
 
 ### API keys
 
 ```ruby
 key = Millionsend::ApiKeys.create(name: "ci", permission: "sending_access", domain_id: domain[:id])
 key[:token] # only returned here
+agent_key = Millionsend::ApiKeys.create(name: "signup-bot", permission: "full_access", inbox_id: inbox[:id])
+# reads and sends for that one inbox only; list rows carry inbox_id
 Millionsend::ApiKeys.list
 Millionsend::ApiKeys.remove(key[:id])
 ```
@@ -372,6 +476,10 @@ transport failures that never reached the API raise `ApplicationError` with `#st
 `Emails.send` and `Batch.send` raise `AllRecipientsSuppressedError` (`all_recipients_suppressed`,
 422) when every `to` recipient is on the suppression list or opted out of the send's `topic_id`.
 
+Receiving and inboxes add the names `inbox_send_policy`, `inbox_send_cap_reached`,
+`approval_required`, `email_quarantined`, `email_blocked`, `too_many_waits` and `plan_limit_reached`,
+raised as `ApplicationError` with that `#name`.
+
 ## Migrating from Resend
 
 ```diff
@@ -401,10 +509,11 @@ works as in resend-ruby. Notes:
   part of this SDK. `Millionsend::Segments` is the dynamic-filter feature (`/segments`), not
   Resend's audiences alias.
 - Not in the API (yet), so not here: broadcast recipients/clicked links, email sharing and
-  metrics, contact imports, receiving, automations, logs, OAuth grants, webhook event replay.
+  metrics, contact imports, automations, logs, OAuth grants, webhook event replay.
 - MillionSend extensions with no Resend counterpart: `Segments`, `Contacts::Batch`,
   `Contacts.preferences_link`, `Webhooks.rotate`, `Usage`, `Deliverability`,
-  `Emails.get_insights`, `Suppressions` `origin: "unsubscribe"`.
+  `Emails.get_insights`, `Suppressions` `origin: "unsubscribe"`, the receiving long-poll,
+  `Emails::Receiving.reply`/`forward`/`remove`, and `Inboxes::Safety`, `Codes` and `Quarantine`.
 
 ## License
 

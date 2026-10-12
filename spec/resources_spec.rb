@@ -786,4 +786,341 @@ RSpec.describe "resource wiring" do
       expect(WebMock).to have_requested(:get, "https://api.test/usage")
     end
   end
+
+  # Fixtures in the shapes of the inbox wire contract: Resend's fields plus
+  # MillionSend's extension keys.
+  def draft_body(status = "pending_approval")
+    { object: "inbox_draft", id: "d1", type: "reply", to: ["ada@x.dev"], cc: [], bcc: [], subject: "Re: Hi",
+      html: nil, text: "Thanks", thread_id: "t1", reply_to_email_id: "m1", email_id: nil,
+      created_at: "2026-10-12T10:00:00.000Z", updated_at: "2026-10-12T10:00:00.000Z",
+      status: status, approval_reasons: ["send_policy"], forward: false, decided_by: nil, decided_at: nil,
+      expires_at: "2026-10-19T10:00:00.000Z" }
+  end
+
+  def inbox_body
+    { object: "inbox", id: "i1", name: "Signup bot", email_address: "signup-bot-7f3k@acme.agents.example",
+      domain_id: "sd1", receiving_address: nil, from_name: nil, unread: 2, drafts: 1,
+      last_received: "2026-10-12T10:00:00.000Z", created_at: "2026-10-12T09:00:00.000Z",
+      kind: "agent", shared: true, expires_at: "2026-10-13T09:00:00.000Z", quarantined: 1, pending_approval: 1 }
+  end
+
+  def thread_body
+    { object: "inbox_thread", id: "t1", subject: "Confirm your email", folder: "inbox",
+      labels: [{ id: "l1", name: "Billing", color: "#FFAA00" }], read: false, quarantined: 0 }
+  end
+
+  describe Millionsend::Emails::Receiving do
+    it "list puts every filter on the query and returns the long-poll's held ids" do
+      query = { "limit" => "10", "before" => "r0", "wait" => "30", "since" => "2026-10-12T00:00:00Z",
+                "inbox_id" => "i1", "to" => "bot@x.dev", "from" => "stripe.com", "subject_contains" => "code",
+                "unread" => "true", "include_quarantined" => "true" }
+      body = { object: "list", has_more: false, data: [],
+               held: [{ id: "r1", inbox_id: "i1", reason: "not_allowlisted", created_at: "2026-10-12T10:00:00.000Z" }] }
+      stub_request(:get, "https://api.test/emails/receiving").with(query: query).to_return(ok(JSON.generate(body)))
+
+      res = Millionsend::Emails::Receiving.list(limit: 10, before: "r0", wait: 30, since: "2026-10-12T00:00:00Z",
+                                                inbox_id: "i1", to: "bot@x.dev", from: "stripe.com",
+                                                subject_contains: "code", unread: true, include_quarantined: true)
+      expect(res[:held]).to eq(body[:held])
+
+      stub_request(:get, "https://api.test/emails/receiving").to_return(list_ok)
+      Millionsend::Emails::Receiving.list
+      expect(WebMock).to have_requested(:get, "https://api.test/emails/receiving").with(query: {})
+    end
+
+    it "get passes html_format and keeps the extension fields, unknown values included" do
+      body = { object: "email", id: "r1", from: "noreply@github.com", subject: "Your code", html_format: "cid",
+               inbox_id: "i1", thread_id: "t1", spam_verdict: "pass", virus_verdict: nil, spam_score: 3,
+               screening: { verdict: "clean", sender_trust: "external", quarantine_reason: nil, reasons: [],
+                            injection_score: 2, phishing_score: nil, hidden_text_removed: true },
+               extracted_text: "Your code is 482913",
+               extracted: { kinds: ["code"], code: "482913", link: nil, link_domain_matches_sender: nil, ambiguous: false },
+               brand_new_field: { verdict: "cosmic" } }
+      stub_request(:get, "https://api.test/emails/receiving/r1").with(query: { "html_format" => "cid" })
+                                                                .to_return(ok(JSON.generate(body)))
+      expect(Millionsend::Emails::Receiving.get("r1", html_format: "cid")).to eq(body)
+
+      stub_request(:get, "https://api.test/emails/receiving/r1").to_return(ok('{"object":"email","id":"r1"}'))
+      Millionsend::Emails::Receiving.get("r1")
+      expect(WebMock).to have_requested(:get, "https://api.test/emails/receiving/r1").with(query: {})
+    end
+
+    it "reply posts the body with an Idempotency-Key and tells a sent reply from a drafted one" do
+      sent = { object: "email", id: "e9", thread_id: "t1", inbox_id: "i1" }
+      stub_request(:post, "https://api.test/emails/receiving/r1/reply").to_return(ok(JSON.generate(sent)))
+      params = { text: "Thanks", subject: "Re: Hi", cc: ["c@x.dev"], bcc: "b@x.dev", reply_all: true,
+                 requires_approval: false, from: "bot@acme.dev", inbox_id: "i1" }
+      res = Millionsend::Emails::Receiving.reply("r1", params, idempotency_key: "rk-1")
+      expect(WebMock).to have_requested(:post, "https://api.test/emails/receiving/r1/reply").with(
+        headers: { "Idempotency-Key" => "rk-1" },
+        body: { "text" => "Thanks", "subject" => "Re: Hi", "cc" => ["c@x.dev"], "bcc" => "b@x.dev", "reply_all" => true,
+                "requires_approval" => false, "from" => "bot@acme.dev", "inbox_id" => "i1" }
+      )
+      expect(res).to eq({ kind: "sent", data: sent })
+
+      stub_request(:post, "https://api.test/emails/receiving/r1/reply")
+        .to_return(status: 202, body: JSON.generate(draft_body), headers: { "Content-Type" => "application/json" })
+      res = Millionsend::Emails::Receiving.reply("r1", { text: "Thanks" }, options: { idempotency_key: "rk-2" })
+      expect(res[:kind]).to eq("draft")
+      expect(res[:data][:approval_reasons]).to eq(["send_policy"])
+    end
+
+    it "forward posts to, mode and the note, and a refusal keeps its error name" do
+      stub_request(:post, "https://api.test/emails/receiving/r1/forward").to_return(ok('{"object":"email","id":"e9"}'))
+      Millionsend::Emails::Receiving.forward("r1", { to: ["ops@acme.dev"], text: "FYI", mode: "attachment" })
+      expect(WebMock).to(have_requested(:post, "https://api.test/emails/receiving/r1/forward")
+        .with(body: { "to" => ["ops@acme.dev"], "text" => "FYI", "mode" => "attachment" }) { |req| !req.headers.key?("Idempotency-Key") })
+
+      stub_request(:post, "https://api.test/emails/receiving/r2/forward").to_return(
+        status: 403, body: '{"statusCode":403,"name":"email_quarantined","message":"This email is quarantined"}',
+        headers: { "Content-Type" => "application/json" }
+      )
+      expect { Millionsend::Emails::Receiving.forward("r2", { to: "ops@acme.dev" }) }
+        .to raise_error(Millionsend::ApplicationError) { |e| expect([e.status_code, e.name]).to eq([403, "email_quarantined"]) }
+    end
+
+    it "remove erases with DELETE /emails/receiving/:id" do
+      stub_request(:delete, "https://api.test/emails/receiving/r1").to_return(ok('{"object":"email","id":"r1","deleted":true}'))
+      expect(Millionsend::Emails::Receiving.remove("r1")[:deleted]).to eq(true)
+    end
+
+    it "Attachments list and get take positional ids or resend-ruby's hashes" do
+      stub_request(:get, "https://api.test/emails/receiving/r1/attachments").with(query: { "limit" => "5" }).to_return(list_ok)
+      Millionsend::Emails::Receiving::Attachments.list("r1", limit: 5)
+      Millionsend::Emails::Receiving::Attachments.list(email_id: "r1", limit: 5)
+      expect(WebMock).to have_requested(:get, "https://api.test/emails/receiving/r1/attachments")
+        .with(query: { "limit" => "5" }).twice
+
+      stub_request(:get, "https://api.test/emails/receiving/r1/attachments/a1").to_return(ok)
+      Millionsend::Emails::Receiving::Attachments.get("r1", "a1")
+      Millionsend::Emails::Receiving::Attachments.get(email_id: "r1", id: "a1")
+      expect(WebMock).to have_requested(:get, "https://api.test/emails/receiving/r1/attachments/a1").twice
+    end
+  end
+
+  describe Millionsend::Inboxes do
+    it "create posts every field, and an empty create posts {} for a shared-domain address" do
+      stub_request(:post, "https://api.test/inboxes").to_return(ok(JSON.generate(inbox_body)))
+      res = Millionsend::Inboxes.create(email_address: "bot@acme.dev", name: "Bot", from_name: "Acme Bot", forwarding: false,
+                                        kind: "human", expires_in: "7d", safety: { accept_from: "allowlist", send_cap: nil })
+      expect(WebMock).to(have_requested(:post, "https://api.test/inboxes").with do |req|
+        req.body == '{"email_address":"bot@acme.dev","name":"Bot","from_name":"Acme Bot","forwarding":false,' \
+                    '"kind":"human","expires_in":"7d","safety":{"accept_from":"allowlist","send_cap":null}}'
+      end)
+      expect(res).to eq(inbox_body)
+
+      Millionsend::Inboxes.create
+      expect(WebMock).to have_requested(:post, "https://api.test/inboxes").with(body: "{}")
+    end
+
+    it "covers list/get/update/remove, with an address as the id" do
+      stub_request(:get, "https://api.test/inboxes").with(query: { "kind" => "agent", "limit" => "2" }).to_return(list_ok)
+      Millionsend::Inboxes.list(kind: "agent", limit: 2)
+      expect(WebMock).to have_requested(:get, "https://api.test/inboxes").with(query: { "kind" => "agent", "limit" => "2" })
+
+      stub_request(:get, "https://api.test/inboxes/bot%2Bsales%40acme.dev").to_return(ok(JSON.generate(inbox_body)))
+      expect(Millionsend::Inboxes.get("bot+sales@acme.dev")[:quarantined]).to eq(1)
+
+      stub_request(:patch, "https://api.test/inboxes/i1").to_return(ok(JSON.generate(inbox_body)))
+      Millionsend::Inboxes.update("i1", { name: "Renamed", from_name: "", expires_in: nil })
+      expect(WebMock).to(have_requested(:patch, "https://api.test/inboxes/i1")
+        .with { |req| req.body == '{"name":"Renamed","from_name":"","expires_in":null}' })
+
+      stub_request(:delete, "https://api.test/inboxes/i1").to_return(ok('{"object":"inbox","id":"i1","deleted":true}'))
+      expect(Millionsend::Inboxes.remove("i1")[:deleted]).to eq(true)
+    end
+
+    it "Safety get and update; nil send_cap goes out as null" do
+      body = { object: "inbox_safety", inbox_id: "i1", accept_from: "verified", allowlist: [], owner_addresses: [],
+               screening: true, extract_codes: true, send_policy: "reply_only", require_approval: false,
+               private_codes: true, send_cap: 200, forward_to: [] }
+      stub_request(:get, "https://api.test/inboxes/i1/safety").to_return(ok(JSON.generate(body)))
+      expect(Millionsend::Inboxes::Safety.get("i1")).to eq(body)
+
+      stub_request(:patch, "https://api.test/inboxes/i1/safety").to_return(ok(JSON.generate(body)))
+      Millionsend::Inboxes::Safety.update("i1", { allowlist: ["*@stripe.com"], send_cap: nil })
+      expect(WebMock).to(have_requested(:patch, "https://api.test/inboxes/i1/safety")
+        .with { |req| req.body == '{"allowlist":["*@stripe.com"],"send_cap":null}' })
+    end
+
+    it "Codes.latest sends from, wait and max_age" do
+      body = { object: "verification_code", status: "found", kind: "otp", code: "482913", url: nil,
+               link_domain_matches_sender: nil, email_id: "r1", from: "noreply@github.com",
+               received_at: "2026-10-12T10:00:00.000Z", sender_trust: "external" }
+      query = { "from" => "github.com", "wait" => "20", "max_age" => "600" }
+      stub_request(:get, "https://api.test/inboxes/i1/codes/latest").with(query: query).to_return(ok(JSON.generate(body)))
+      expect(Millionsend::Inboxes::Codes.latest("i1", from: "github.com", wait: 20, max_age: 600)).to eq(body)
+    end
+
+    it "Quarantine list and release, {} by default" do
+      stub_request(:get, "https://api.test/inboxes/i1/quarantine").with(query: { "limit" => "5" }).to_return(list_ok)
+      Millionsend::Inboxes::Quarantine.list("i1", limit: 5)
+      expect(WebMock).to have_requested(:get, "https://api.test/inboxes/i1/quarantine").with(query: { "limit" => "5" })
+
+      body = { object: "inbox_release", inbox_id: "i1", email_id: "r1", released_at: "2026-10-12T10:00:00.000Z",
+               trusted_sender: "ada@x.dev" }
+      stub_request(:post, "https://api.test/inboxes/i1/quarantine/r1/release").to_return(ok(JSON.generate(body)))
+      Millionsend::Inboxes::Quarantine.release("i1", "r1")
+      expect(WebMock).to have_requested(:post, "https://api.test/inboxes/i1/quarantine/r1/release").with(body: "{}")
+      expect(Millionsend::Inboxes::Quarantine.release("i1", "r1", trust_sender: true)).to eq(body)
+      expect(WebMock).to have_requested(:post, "https://api.test/inboxes/i1/quarantine/r1/release")
+        .with(body: { "trust_sender" => true })
+    end
+
+    it "Labels cover list/create/update/remove" do
+      stub_request(:get, "https://api.test/inboxes/i1/labels")
+        .to_return(ok('{"object":"list","data":[{"id":"l1","name":"Billing","color":"#FFAA00","created_at":"2026-10-12T10:00:00.000Z"}]}'))
+      expect(Millionsend::Inboxes::Labels.list("i1")[:data][0][:color]).to eq("#FFAA00")
+
+      stub_request(:post, "https://api.test/inboxes/i1/labels").to_return(ok('{"object":"inbox_label","id":"l1"}'))
+      Millionsend::Inboxes::Labels.create("i1", { name: "Billing", color: "#FFAA00" })
+      expect(WebMock).to have_requested(:post, "https://api.test/inboxes/i1/labels")
+        .with(body: { "name" => "Billing", "color" => "#FFAA00" })
+
+      stub_request(:patch, "https://api.test/inboxes/i1/labels/l1").to_return(ok('{"object":"inbox_label","id":"l1"}'))
+      Millionsend::Inboxes::Labels.update("i1", "l1", { name: "Invoices" })
+      expect(WebMock).to have_requested(:patch, "https://api.test/inboxes/i1/labels/l1").with(body: { "name" => "Invoices" })
+
+      stub_request(:delete, "https://api.test/inboxes/i1/labels/l1").to_return(ok('{"object":"inbox_label","id":"l1","deleted":true}'))
+      Millionsend::Inboxes::Labels.remove("i1", "l1")
+      expect(WebMock).to have_requested(:delete, "https://api.test/inboxes/i1/labels/l1")
+    end
+
+    it "Threads list and search send arrays as one comma-separated value" do
+      query = { "folders" => "inbox,archive", "labels" => "l1,l2", "read" => "false", "include_quarantined" => "true",
+                "limit" => "20", "after" => "t0" }
+      stub_request(:get, "https://api.test/inboxes/i1/threads").with(query: query).to_return(list_ok)
+      Millionsend::Inboxes::Threads.list("i1", folders: %w[inbox archive], labels: %w[l1 l2], read: false,
+                                               include_quarantined: true, limit: 20, after: "t0")
+      expect(WebMock).to have_requested(:get, "https://api.test/inboxes/i1/threads").with(query: query)
+
+      search = { "query" => "\"invoice 42\" -spam", "from" => "stripe.com,ada", "to" => "bot@acme.dev",
+                 "has_attachment" => "true", "start_date" => "2026-10-01", "end_date" => "2026-10-12", "folders" => "sent" }
+      item = { id: "t1", subject: "Invoice 42", from: "Stripe <billing@stripe.com>", to: ["bot@acme.dev"], cc: [], bcc: [],
+               labels: [], message_count: 2, has_attachment: true, has_draft: false, read: true,
+               received_at: "2026-10-12T10:00:00.000Z", folder: "inbox", matched_email_id: "m2",
+               highlights: { subject: ["**Invoice** 42"] } }
+      stub_request(:get, "https://api.test/inboxes/i1/threads/search").with(query: search)
+                                                                      .to_return(ok(JSON.generate({ object: "list", has_more: false, data: [item] })))
+      res = Millionsend::Inboxes::Threads.search("i1", query: "\"invoice 42\" -spam", from: ["stripe.com", "ada"],
+                                                       to: ["bot@acme.dev"], has_attachment: true, start_date: "2026-10-01",
+                                                       end_date: "2026-10-12", folders: ["sent"])
+      expect(res[:data][0][:highlights]).to eq({ subject: ["**Invoice** 42"] })
+    end
+
+    it "Threads get/update/remove" do
+      stub_request(:get, "https://api.test/inboxes/i1/threads/t1").to_return(ok(JSON.generate(thread_body)))
+      expect(Millionsend::Inboxes::Threads.get("i1", "t1")).to eq(thread_body)
+
+      stub_request(:patch, "https://api.test/inboxes/i1/threads/t1").to_return(ok(JSON.generate(thread_body)))
+      Millionsend::Inboxes::Threads.update("i1", "t1", { read: true, folder: "archive", label_id: "l1" })
+      expect(WebMock).to have_requested(:patch, "https://api.test/inboxes/i1/threads/t1")
+        .with(body: { "read" => true, "folder" => "archive", "label_id" => "l1" })
+
+      stub_request(:delete, "https://api.test/inboxes/i1/threads/t1").to_return(ok('{"object":"inbox_thread","id":"t1","deleted":false}'))
+      expect(Millionsend::Inboxes::Threads.remove("i1", "t1")[:deleted]).to eq(false)
+    end
+
+    it "Threads::Emails list/get/reply/forward, a reply held as a draft included" do
+      stub_request(:get, "https://api.test/inboxes/i1/threads/t1/emails").with(query: { "after" => "m1" }).to_return(list_ok)
+      Millionsend::Inboxes::Threads::Emails.list("i1", "t1", after: "m1")
+      expect(WebMock).to have_requested(:get, "https://api.test/inboxes/i1/threads/t1/emails").with(query: { "after" => "m1" })
+
+      email = { id: "m1", direction: "inbound", from: "Ada <ada@x.dev>", to: ["bot@acme.dev"], cc: [], bcc: [], reply_to: [],
+                subject: "Hi", message_id: "<a@x.dev>", html: nil, text: "Hello", attachments: [{ id: "a1", filename: nil, size: nil }],
+                read: false, received_at: "2026-10-12T10:00:00.000Z", extracted_text: "Hello", spam_verdict: "gray",
+                virus_verdict: "processing_failed",
+                screening: { verdict: "suspicious", sender_trust: "unauthenticated", quarantine_reason: nil, reasons: [],
+                             injection_score: nil, phishing_score: nil, hidden_text_removed: false } }
+      stub_request(:get, "https://api.test/inboxes/i1/threads/t1/emails/m1").to_return(ok(JSON.generate(email)))
+      expect(Millionsend::Inboxes::Threads::Emails.get("i1", "t1", "m1")).to eq(email)
+
+      sent = email.merge(id: "m2", direction: "outbound", read: true, email_id: "m2", thread_id: "t1", inbox_id: "i1", status: "queued")
+      stub_request(:post, "https://api.test/inboxes/i1/threads/t1/emails/m1/reply").to_return(ok(JSON.generate(sent)))
+      res = Millionsend::Inboxes::Threads::Emails.reply("i1", "t1", "m1", { text: "Thanks", reply_all: true, requires_approval: true },
+                                                        idempotency_key: "tr-1")
+      expect(WebMock).to have_requested(:post, "https://api.test/inboxes/i1/threads/t1/emails/m1/reply").with(
+        headers: { "Idempotency-Key" => "tr-1" }, body: { "text" => "Thanks", "reply_all" => true, "requires_approval" => true }
+      )
+      expect(res).to eq({ kind: "sent", data: sent })
+
+      stub_request(:post, "https://api.test/inboxes/i1/threads/t1/emails/m1/forward")
+        .to_return(status: 202, body: JSON.generate(draft_body), headers: { "Content-Type" => "application/json" })
+      res = Millionsend::Inboxes::Threads::Emails.forward("i1", "t1", "m1", { to: "ops@acme.dev", cc: ["c@acme.dev"], subject: "Fwd: Hi" })
+      expect(WebMock).to have_requested(:post, "https://api.test/inboxes/i1/threads/t1/emails/m1/forward")
+        .with(body: { "to" => "ops@acme.dev", "cc" => ["c@acme.dev"], "subject" => "Fwd: Hi" })
+      expect(res).to eq({ kind: "draft", data: draft_body })
+    end
+
+    it "Drafts cover list/create/get/update/remove/reject" do
+      stub_request(:get, "https://api.test/inboxes/i1/drafts").with(query: { "limit" => "3" }).to_return(list_ok)
+      Millionsend::Inboxes::Drafts.list("i1", limit: 3)
+      expect(WebMock).to have_requested(:get, "https://api.test/inboxes/i1/drafts").with(query: { "limit" => "3" })
+
+      stub_request(:post, "https://api.test/inboxes/i1/drafts").to_return(ok(JSON.generate(draft_body("draft"))))
+      Millionsend::Inboxes::Drafts.create("i1", { to: ["ada@x.dev"], subject: "Re: Hi", text: "Thanks", thread_id: "t1",
+                                                  reply_to_email_id: "m1" })
+      expect(WebMock).to have_requested(:post, "https://api.test/inboxes/i1/drafts").with(
+        body: { "to" => ["ada@x.dev"], "subject" => "Re: Hi", "text" => "Thanks", "thread_id" => "t1", "reply_to_email_id" => "m1" }
+      )
+
+      stub_request(:get, "https://api.test/inboxes/i1/drafts/d1").to_return(ok(JSON.generate(draft_body)))
+      expect(Millionsend::Inboxes::Drafts.get("i1", "d1")[:status]).to eq("pending_approval")
+
+      stub_request(:patch, "https://api.test/inboxes/i1/drafts/d1").to_return(ok(JSON.generate(draft_body("draft"))))
+      Millionsend::Inboxes::Drafts.update("i1", "d1", { subject: nil, cc: [], html: "<p>Thanks</p>" })
+      expect(WebMock).to(have_requested(:patch, "https://api.test/inboxes/i1/drafts/d1")
+        .with { |req| req.body == '{"subject":null,"cc":[],"html":"<p>Thanks</p>"}' })
+
+      stub_request(:delete, "https://api.test/inboxes/i1/drafts/d1").to_return(ok('{"object":"inbox_draft","id":"d1","deleted":true}'))
+      Millionsend::Inboxes::Drafts.remove("i1", "d1")
+      expect(WebMock).to have_requested(:delete, "https://api.test/inboxes/i1/drafts/d1")
+
+      stub_request(:post, "https://api.test/inboxes/i1/drafts/d1/reject").to_return(ok(JSON.generate(draft_body("rejected"))))
+      expect(Millionsend::Inboxes::Drafts.reject("i1", "d1")[:status]).to eq("rejected")
+      expect(WebMock).to(have_requested(:post, "https://api.test/inboxes/i1/drafts/d1/reject").with { |req| req.body.to_s.empty? })
+    end
+
+    it "Drafts.send posts no body, takes an Idempotency-Key and reports a held draft" do
+      sent = { object: "inbox_draft", id: "d1", thread_id: "t1", email_id: "e9" }
+      stub_request(:post, "https://api.test/inboxes/i1/drafts/d1/send").to_return(ok(JSON.generate(sent)))
+      expect(Millionsend::Inboxes::Drafts.send("i1", "d1", idempotency_key: "ds-1")).to eq({ kind: "sent", data: sent })
+      expect(WebMock).to(have_requested(:post, "https://api.test/inboxes/i1/drafts/d1/send")
+        .with(headers: { "Idempotency-Key" => "ds-1" }) { |req| req.body.to_s.empty? && !req.headers.key?("Content-Type") })
+
+      stub_request(:post, "https://api.test/inboxes/i1/drafts/d2/send")
+        .to_return(status: 202, body: JSON.generate(draft_body), headers: { "Content-Type" => "application/json" })
+      expect(Millionsend::Inboxes::Drafts.send("i1", "d2")).to eq({ kind: "draft", data: draft_body })
+
+      stub_request(:post, "https://api.test/inboxes/i1/drafts/d3/send").to_return(
+        status: 403, body: '{"statusCode":403,"name":"approval_required","message":"A person must approve this draft"}',
+        headers: { "Content-Type" => "application/json" }
+      )
+      expect { Millionsend::Inboxes::Drafts.send("i1", "d3") }
+        .to raise_error(Millionsend::Error) { |e| expect(e.name).to eq("approval_required") }
+    end
+  end
+
+  describe "inbox fields on existing resources" do
+    it "passes receiving_catch_all, inbox_id and inbox_ids through" do
+      stub_request(:patch, "https://api.test/domains/d1").to_return(ok('{"object":"domain","id":"d1","receiving_catch_all":true}'))
+      expect(Millionsend::Domains.update("d1", { receiving_catch_all: true })[:receiving_catch_all]).to eq(true)
+      expect(WebMock).to have_requested(:patch, "https://api.test/domains/d1").with(body: { "receiving_catch_all" => true })
+
+      stub_request(:post, "https://api.test/api-keys").to_return(ok('{"id":"k1","token":"ms_x"}'))
+      Millionsend::ApiKeys.create({ name: "agent", permission: "full_access", inbox_id: "i1" })
+      expect(WebMock).to have_requested(:post, "https://api.test/api-keys")
+        .with(body: { "name" => "agent", "permission" => "full_access", "inbox_id" => "i1" })
+
+      stub_request(:post, "https://api.test/webhooks").to_return(ok('{"object":"webhook","id":"w1","signing_secret":"whsec_x"}'))
+      Millionsend::Webhooks.create({ endpoint: "https://x.dev/h", events: ["email.received", "inbox.email.received"], inbox_ids: ["i1"] })
+      expect(WebMock).to have_requested(:post, "https://api.test/webhooks").with(
+        body: { "endpoint" => "https://x.dev/h", "events" => ["email.received", "inbox.email.received"], "inbox_ids" => ["i1"] }
+      )
+
+      stub_request(:patch, "https://api.test/webhooks/w1").to_return(ok('{"object":"webhook","id":"w1"}'))
+      Millionsend::Webhooks.update("w1", { inbox_ids: nil })
+      expect(WebMock).to(have_requested(:patch, "https://api.test/webhooks/w1").with { |req| req.body == '{"inbox_ids":null}' })
+    end
+  end
 end

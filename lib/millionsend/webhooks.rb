@@ -5,7 +5,8 @@ module Millionsend
   module Webhooks
     class << self
       # POST /webhooks — endpoint, events[], signing_secret (optional; pass an
-      # existing whsec_ value to keep a receiver verifying unchanged).
+      # existing whsec_ value to keep a receiver verifying unchanged),
+      # inbox_ids (inbox events and email.received for these inboxes only).
       def create(params)
         Millionsend::Request.new(method: :post, path: "/webhooks", body: params).perform
       end
@@ -21,7 +22,8 @@ module Millionsend
         Millionsend::Request.new(method: :get, path: "/webhooks", query: Millionsend::Util.list_query(options)).perform
       end
 
-      # PATCH /webhooks/:id — endpoint, events, status ("enabled"/"disabled").
+      # PATCH /webhooks/:id — endpoint, events, status ("enabled"/"disabled"),
+      # inbox_ids (nil: every inbox).
       def update(id, params)
         Millionsend::Request.new(method: :patch, path: member_path(id), body: params).perform
       end

@@ -5,7 +5,8 @@ module Millionsend
   module ApiKeys
     class << self
       # POST /api-keys — name, permission ("full_access" default or
-      # "sending_access"), domain_id. Returns { id:, token: }.
+      # "sending_access"), domain_id, inbox_id (a full_access key that reads
+      # and sends for that one inbox). Returns { id:, token: }.
       def create(params)
         Millionsend::Request.new(method: :post, path: "/api-keys", body: params).perform
       end

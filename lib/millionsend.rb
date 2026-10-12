@@ -5,6 +5,7 @@ require "millionsend/util"
 require "millionsend/error"
 require "millionsend/request"
 require "millionsend/emails"
+require "millionsend/receiving"
 require "millionsend/batch"
 require "millionsend/contacts"
 require "millionsend/contact_properties"
@@ -18,6 +19,7 @@ require "millionsend/api_keys"
 require "millionsend/templates"
 require "millionsend/usage"
 require "millionsend/deliverability"
+require "millionsend/inboxes"
 
 # Ruby client for the MillionSend HTTP API. Configure once, then call the
 # resource modules:

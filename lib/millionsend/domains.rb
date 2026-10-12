@@ -21,7 +21,8 @@ module Millionsend
       end
 
       # PATCH /domains/:id — open_tracking, click_tracking, tracking_subdomain
-      # (nil or "" clears it).
+      # (nil or "" clears it), receiving_catch_all (mail to addresses without
+      # an inbox is kept rather than refused; paid plans on Cloud).
       def update(id, params)
         Millionsend::Request.new(method: :patch, path: member_path(id), body: params).perform
       end

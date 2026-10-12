@@ -36,6 +36,19 @@ module Millionsend
     end
 
     def perform
+      perform_with_status.last
+    end
+
+    # Reply, forward and draft send answer 200 once the email went out and 202
+    # when the inbox's rules held it as a draft for a person to approve.
+    def perform_outcome
+      status, body = perform_with_status
+      { kind: status == 202 ? "draft" : "sent", data: body }
+    end
+
+    private
+
+    def perform_with_status
       api_key = Millionsend.api_key
       if api_key.nil? || api_key.to_s.empty?
         # Client-side failure: same class and stable name as a transport error,
@@ -60,8 +73,6 @@ module Millionsend
 
       handle(response)
     end
-
-    private
 
     def build_uri
       base = Millionsend.base_url.to_s.sub(%r{/+\z}, "")
@@ -98,7 +109,7 @@ module Millionsend
       body = parse(response.body)
       raise Millionsend::Error.from_response(status, body) unless (200..299).cover?(status)
 
-      body
+      [status, body]
     end
 
     def parse(text)
