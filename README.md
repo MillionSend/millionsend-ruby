@@ -31,7 +31,7 @@ Millionsend.api_key = "ms_123"
 
 email = Millionsend::Emails.send(
   from: "Acme <onboarding@acme.dev>",
-  to: "delivered@resend.dev",
+  to: "success@simulator.amazonses.com",
   subject: "Hello from MillionSend",
   html: "<strong>It works!</strong>"
 )
