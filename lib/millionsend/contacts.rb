@@ -103,7 +103,8 @@ module Millionsend
         # "skip", "upsert") for emails that already belong to a contact,
         # batch_validation ("strict" default, "permissive" writes the valid
         # subset and lists failures under errors[]), idempotency_key. Returns
-        # { data: [{ index:, id:, status: }], counts: {...}, errors: [...] }.
+        # { data: [{ index:, id:, status: }], counts: {...}, errors: [{ index:,
+        # statusCode:, name:, message: }] }.
         def create(list, options = {})
           options = options[:options] if options.is_a?(Hash) && options.key?(:options)
           Millionsend::Request.new(

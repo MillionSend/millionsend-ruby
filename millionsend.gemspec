@@ -8,8 +8,9 @@ Gem::Specification.new do |spec|
   spec.summary     = "Official Ruby SDK for MillionSend — a self-hostable, Resend-compatible email API."
   spec.description = "Ruby client for the MillionSend HTTP API: emails, batch, contacts, " \
                      "contact properties, topics, broadcasts, segments, suppressions, domains, " \
-                     "webhooks, API keys, templates and usage. Wire-compatible with Resend and " \
-                     "mirror-shaped after resend-ruby, so migrating is mostly an import swap."
+                     "webhooks, API keys, templates, usage, received mail and inboxes. " \
+                     "Wire-compatible with Resend and mirror-shaped after resend-ruby, so " \
+                     "migrating is mostly an import swap."
   spec.authors     = ["MillionSend"]
   spec.homepage    = "https://github.com/MillionSend/millionsend-ruby"
   spec.license     = "MIT"

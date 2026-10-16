@@ -20,7 +20,7 @@ RSpec.describe "e2e: contacts lifecycle", :e2e, if: ENV["MILLIONSEND_API_KEY"] d
   end
 
   it "creates, reads, updates and deletes a contact" do
-    email = "sdk-e2e-#{Time.now.to_i}@example.com"
+    email = "success+sdk-e2e-#{Time.now.to_i}@simulator.amazonses.com"
     created = Millionsend::Contacts.create(email: email, first_name: "Ada")
     expect(created[:id]).not_to be_nil
 

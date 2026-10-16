@@ -5,6 +5,7 @@ require "millionsend/util"
 require "millionsend/error"
 require "millionsend/request"
 require "millionsend/emails"
+require "millionsend/receiving"
 require "millionsend/batch"
 require "millionsend/contacts"
 require "millionsend/contact_properties"
@@ -18,13 +19,14 @@ require "millionsend/api_keys"
 require "millionsend/templates"
 require "millionsend/usage"
 require "millionsend/deliverability"
+require "millionsend/inboxes"
 
 # Ruby client for the MillionSend HTTP API. Configure once, then call the
 # resource modules:
 #
 #   Millionsend.api_key  = "ms_..."
 #   Millionsend.base_url = "https://mail.acme.dev"
-#   Millionsend::Emails.send(from: "onboarding@acme.dev", to: "you@example.com",
+#   Millionsend::Emails.send(from: "onboarding@acme.dev", to: "success@simulator.amazonses.com",
 #                            subject: "Hi", html: "<strong>it works</strong>")
 #
 # api_key falls back to the MILLIONSEND_API_KEY env var; base_url to

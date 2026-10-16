@@ -33,6 +33,13 @@ module Millionsend
       { limit: options[:limit], after: options[:after], before: options[:before] }
     end
 
+    # A list or search query as given (Ruby's snake_case is the wire's), with
+    # arrays comma-joined: the inbox endpoints read CSV and answer 422 to a
+    # repeated param. nil values are dropped when the query string is built.
+    def csv_query(options)
+      (options || {}).transform_values { |v| v.is_a?(Array) ? v.join(",") : v }
+    end
+
     # ?include= for the contact lists: the names comma-joined, or nil (dropped
     # from the query) when none were given.
     def include_query(include)

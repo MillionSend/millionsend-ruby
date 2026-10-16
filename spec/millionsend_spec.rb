@@ -138,6 +138,7 @@ RSpec.describe Millionsend do
         expect(err.status_code).to eq(422)
         expect(err.name).to eq("validation_error")
         expect(err.message).to eq("bad")
+        expect(err.retry_after).to be_nil
       end
     end
 
@@ -164,11 +165,40 @@ RSpec.describe Millionsend do
         "concurrent_idempotent_requests" => Millionsend::ConcurrentIdempotentRequestsError,
         "internal_server_error" => Millionsend::InternalServerError,
         "all_recipients_suppressed" => Millionsend::AllRecipientsSuppressedError,
+        "forbidden" => Millionsend::ForbiddenError,
+        "inbox_send_policy" => Millionsend::InboxSendPolicyError,
+        "inbox_send_cap_reached" => Millionsend::InboxSendCapReachedError,
+        "approval_required" => Millionsend::ApprovalRequiredError,
+        "email_quarantined" => Millionsend::EmailQuarantinedError,
+        "email_blocked" => Millionsend::EmailBlockedError,
+        "too_many_waits" => Millionsend::TooManyWaitsError,
+        "name_review_unavailable" => Millionsend::NameReviewUnavailableError,
         "unknown_future_name" => Millionsend::ApplicationError,
       }.each do |name, klass|
         err = Millionsend::Error.from_response(400, { statusCode: 400, name: name, message: "m" })
         expect(err).to be_a(klass)
         expect(err.name).to eq(name)
+      end
+    end
+
+    it "carries the retry-after header in seconds as retry_after" do
+      stub_request(:post, "https://api.test/inboxes").to_return(
+        status: 503,
+        body: '{"statusCode":503,"name":"name_review_unavailable","message":"Try again in a few minutes"}',
+        headers: { "Content-Type" => "application/json", "retry-after" => "300" }
+      )
+      expect { Millionsend::Inboxes.create(username: "support-bot") }
+        .to raise_error(Millionsend::NameReviewUnavailableError) do |err|
+          expect([err.status_code, err.name, err.retry_after]).to eq([503, "name_review_unavailable", 300])
+        end
+    end
+
+    it "answers an older server's text/plain 404 as ApplicationError with status_code 404" do
+      stub_request(:get, "https://api.test/emails/e1")
+        .to_return(status: 404, body: "404 Not Found", headers: { "Content-Type" => "text/plain" })
+
+      expect { Millionsend::Emails.get("e1") }.to raise_error(Millionsend::ApplicationError) do |err|
+        expect([err.status_code, err.name]).to eq([404, "application_error"])
       end
     end
 
@@ -188,6 +218,19 @@ RSpec.describe Millionsend do
       expect { Millionsend::Emails.get("e1") }.to raise_error(Millionsend::Error) do |err|
         expect(err.status_code).to be_nil
       end
+    end
+
+    it "never sends a path an empty, \".\" or \"..\" id would turn into another resource's" do
+      stub_request(:delete, "https://api.test/inboxes/ib1/labels/...").to_return(status: 200, body: "{}")
+
+      [
+        -> { Millionsend::Inboxes::Labels.remove("ib1", "..") },
+        -> { Millionsend::Inboxes::Threads.remove("ib1", ".") },
+        -> { Millionsend::Emails.get("") },
+      ].each { |call| expect(&call).to raise_error(ArgumentError, /empty/) }
+      expect(a_request(:any, /api\.test/)).not_to have_been_made
+      Millionsend::Inboxes::Labels.remove("ib1", "...")
+      expect(a_request(:delete, "https://api.test/inboxes/ib1/labels/...")).to have_been_made
     end
 
     it "raises ApplicationError with a stable name when no API key is configured" do

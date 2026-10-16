@@ -36,6 +36,19 @@ module Millionsend
     end
 
     def perform
+      perform_with_status.last
+    end
+
+    # Reply, forward and draft send answer 200 once the email went out and 202
+    # when the inbox's rules held it as a draft for a person to approve.
+    def perform_outcome
+      status, body = perform_with_status
+      { kind: status == 202 ? "draft" : "sent", data: body }
+    end
+
+    private
+
+    def perform_with_status
       api_key = Millionsend.api_key
       if api_key.nil? || api_key.to_s.empty?
         # Client-side failure: same class and stable name as a transport error,
@@ -61,9 +74,13 @@ module Millionsend
       handle(response)
     end
 
-    private
-
     def build_uri
+      # URL normalization resolves an empty, "." or ".." segment away, so an id
+      # such as ".." would send the request to another resource
+      # (DELETE /inboxes/{id}/labels/.. deletes the inbox).
+      dot = @path.split("/", -1).drop(1).any? { |segment| ["", ".", ".."].include?(segment) }
+      raise ArgumentError, 'an id in the request path is empty, "." or ".."' if dot
+
       base = Millionsend.base_url.to_s.sub(%r{/+\z}, "")
       uri = URI.parse("#{base}#{@path}")
       if !Millionsend.allow_insecure_http && Millionsend::Util.insecure_http?(uri)
@@ -96,9 +113,12 @@ module Millionsend
     def handle(response)
       status = response.code.to_i
       body = parse(response.body)
-      raise Millionsend::Error.from_response(status, body) unless (200..299).cover?(status)
+      unless (200..299).cover?(status)
+        retry_after = Integer(response["retry-after"], 10, exception: false)
+        raise Millionsend::Error.from_response(status, body, retry_after)
+      end
 
-      body
+      [status, body]
     end
 
     def parse(text)
