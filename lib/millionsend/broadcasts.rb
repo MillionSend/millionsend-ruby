@@ -2,7 +2,8 @@
 
 module Millionsend
   # Broadcasts — one email sent to a segment, a topic's subscribers, or every
-  # contact (pass neither segment_id nor topic_id).
+  # contact (pass neither segment_id nor topic_id). Never from the shared
+  # domain: create(send: true) and send answer 403 inbox_send_policy.
   module Broadcasts
     class << self
       # POST /broadcasts

@@ -317,7 +317,8 @@ RSpec.describe "resource wiring" do
     it "Batch.create posts a bare array to /contacts/batch with on_conflict and the validation header" do
       stub_request(:post, "https://api.test/contacts/batch").with(query: { "on_conflict" => "upsert" }).to_return(ok(
         '{"data":[{"object":"contact","index":0,"id":"c1","status":"created"}],' \
-        '"counts":{"created":1,"updated":0,"skipped":0,"failed":1},"errors":[{"index":1,"message":"email: invalid"}]}'
+        '"counts":{"created":1,"updated":0,"skipped":0,"failed":1},' \
+        '"errors":[{"index":1,"statusCode":422,"name":"validation_error","message":"email: invalid"}]}'
       ))
       res = Millionsend::Contacts::Batch.create(
         [{ email: "c@x.dev" }, { email: "nope" }],
@@ -330,7 +331,7 @@ RSpec.describe "resource wiring" do
               body: [{ "email" => "c@x.dev" }, { "email" => "nope" }]))
       expect(res[:data]).to eq([{ object: "contact", index: 0, id: "c1", status: "created" }])
       expect(res[:counts]).to eq({ created: 1, updated: 0, skipped: 0, failed: 1 })
-      expect(res[:errors]).to eq([{ index: 1, message: "email: invalid" }])
+      expect(res[:errors]).to eq([{ index: 1, statusCode: 422, name: "validation_error", message: "email: invalid" }])
     end
 
     it "Batch.create omits on_conflict and the header by default, also under options:" do
@@ -646,6 +647,31 @@ RSpec.describe "resource wiring" do
       Millionsend::Domains.remove("d1")
       expect(WebMock).to have_requested(:delete, "https://api.test/domains/d1")
     end
+
+    it "lists the team's shared subdomain last with its sending mode, and it is read-only" do
+      own = { id: "d1", name: "acme.dev", status: "verified", created_at: "2026-10-13T09:00:00.000Z", region: "us-east-1",
+              open_tracking: true, click_tracking: true, tracking_subdomain: nil,
+              capabilities: { sending: "enabled", receiving: "disabled" }, receiving_catch_all: false, shared: false }
+      shared = { id: "sd1", name: "acme.agents.example", status: "verified", created_at: "2026-10-12T09:00:00.000Z",
+                 region: "us-east-1", open_tracking: false, click_tracking: false, tracking_subdomain: nil,
+                 capabilities: { sending: "enabled", receiving: "enabled" }, receiving_catch_all: false,
+                 shared: true, sending_mode: "reply_only", sending_mode_reason: "plan" }
+      stub_request(:get, "https://api.test/domains")
+        .to_return(ok(JSON.generate({ object: "list", has_more: false, data: [own, shared] })))
+      expect(Millionsend::Domains.list[:data]).to eq([own, shared])
+
+      open_row = shared.merge(object: "domain", sending_mode: "open", sending_mode_reason: nil, records: [])
+      stub_request(:get, "https://api.test/domains/sd1").to_return(ok(JSON.generate(open_row)))
+      expect(Millionsend::Domains.get("sd1")).to include(shared: true, sending_mode_reason: nil, records: [])
+
+      stub_request(:patch, "https://api.test/domains/sd1").to_return(
+        status: 403, headers: { "Content-Type" => "application/json" },
+        body: JSON.generate(statusCode: 403, name: "forbidden",
+                            message: "acme.agents.example is your team's subdomain of the shared domain: it can't be changed or deleted")
+      )
+      expect { Millionsend::Domains.update("sd1", { open_tracking: true }) }
+        .to raise_error(Millionsend::ForbiddenError) { |e| expect(e.status_code).to eq(403) }
+    end
   end
 
   describe Millionsend::Webhooks do
@@ -801,7 +827,7 @@ RSpec.describe "resource wiring" do
     { object: "inbox", id: "i1", name: "Signup bot", email_address: "signup-bot-7f3k@acme.agents.example",
       domain_id: "sd1", receiving_address: nil, from_name: nil, unread: 2, drafts: 1,
       last_received: "2026-10-12T10:00:00.000Z", created_at: "2026-10-12T09:00:00.000Z",
-      kind: "agent", shared: true, expires_at: "2026-10-13T09:00:00.000Z", quarantined: 1, pending_approval: 1 }
+      kind: "agent", shared: true, expires_at: nil, quarantined: 1, pending_approval: 1 }
   end
 
   def thread_body
@@ -827,6 +853,19 @@ RSpec.describe "resource wiring" do
       stub_request(:get, "https://api.test/emails/receiving").to_return(list_ok)
       Millionsend::Emails::Receiving.list
       expect(WebMock).to have_requested(:get, "https://api.test/emails/receiving").with(query: {})
+    end
+
+    it "list answers an unknown inbox_id with not_found, even with wait, and sends unread alone" do
+      stub_request(:get, "https://api.test/emails/receiving").with(query: { "inbox_id" => "i9", "wait" => "30" }).to_return(
+        status: 404, body: '{"statusCode":404,"name":"not_found","message":"Inbox not found."}',
+        headers: { "Content-Type" => "application/json" }
+      )
+      expect { Millionsend::Emails::Receiving.list(inbox_id: "i9", wait: 30) }
+        .to raise_error(Millionsend::NotFoundError) { |e| expect(e.status_code).to eq(404) }
+
+      stub_request(:get, "https://api.test/emails/receiving").with(query: { "unread" => "false" }).to_return(list_ok)
+      Millionsend::Emails::Receiving.list(unread: false)
+      expect(WebMock).to have_requested(:get, "https://api.test/emails/receiving").with(query: { "unread" => "false" })
     end
 
     it "get passes html_format and keeps the extension fields, unknown values included" do
@@ -877,7 +916,7 @@ RSpec.describe "resource wiring" do
         headers: { "Content-Type" => "application/json" }
       )
       expect { Millionsend::Emails::Receiving.forward("r2", { to: "ops@acme.dev" }) }
-        .to raise_error(Millionsend::ApplicationError) { |e| expect([e.status_code, e.name]).to eq([403, "email_quarantined"]) }
+        .to raise_error(Millionsend::EmailQuarantinedError) { |e| expect([e.status_code, e.name]).to eq([403, "email_quarantined"]) }
     end
 
     it "remove erases with DELETE /emails/receiving/:id" do
@@ -914,6 +953,16 @@ RSpec.describe "resource wiring" do
       expect(WebMock).to have_requested(:post, "https://api.test/inboxes").with(body: "{}")
     end
 
+    it "create sends username and domain_id exactly as given" do
+      stub_request(:post, "https://api.test/inboxes").to_return(ok(JSON.generate(inbox_body)))
+      Millionsend::Inboxes.create(username: "leo")
+      Millionsend::Inboxes.create(domain_id: "sd1")
+      Millionsend::Inboxes.create(domain_id: "d1", username: "support")
+      expect(WebMock).to have_requested(:post, "https://api.test/inboxes").with(body: '{"username":"leo"}')
+      expect(WebMock).to have_requested(:post, "https://api.test/inboxes").with(body: '{"domain_id":"sd1"}')
+      expect(WebMock).to have_requested(:post, "https://api.test/inboxes").with(body: '{"domain_id":"d1","username":"support"}')
+    end
+
     it "covers list/get/update/remove, with an address as the id" do
       stub_request(:get, "https://api.test/inboxes").with(query: { "kind" => "agent", "limit" => "2" }).to_return(list_ok)
       Millionsend::Inboxes.list(kind: "agent", limit: 2)
@@ -944,13 +993,18 @@ RSpec.describe "resource wiring" do
         .with { |req| req.body == '{"allowlist":["*@stripe.com"],"send_cap":null}' })
     end
 
-    it "Codes.latest sends from, wait and max_age" do
+    it "Codes.latest sends from, wait, max_age and since" do
       body = { object: "verification_code", status: "found", kind: "otp", code: "482913", url: nil,
                link_domain_matches_sender: nil, email_id: "r1", from: "noreply@github.com",
                received_at: "2026-10-12T10:00:00.000Z", sender_trust: "external" }
       query = { "from" => "github.com", "wait" => "20", "max_age" => "600" }
       stub_request(:get, "https://api.test/inboxes/i1/codes/latest").with(query: query).to_return(ok(JSON.generate(body)))
       expect(Millionsend::Inboxes::Codes.latest("i1", from: "github.com", wait: 20, max_age: 600)).to eq(body)
+
+      since = { "since" => "2026-10-16T12:00:00.000Z" }
+      stub_request(:get, "https://api.test/inboxes/i1/codes/latest").with(query: since).to_return(ok(JSON.generate(body)))
+      Millionsend::Inboxes::Codes.latest("i1", since: "2026-10-16T12:00:00.000Z")
+      expect(WebMock).to have_requested(:get, "https://api.test/inboxes/i1/codes/latest").with(query: since)
     end
 
     it "Quarantine list and release, {} by default" do
@@ -987,26 +1041,29 @@ RSpec.describe "resource wiring" do
       expect(WebMock).to have_requested(:delete, "https://api.test/inboxes/i1/labels/l1")
     end
 
-    it "Threads list and search send arrays as one comma-separated value" do
+    it "Threads list and search send arrays as one comma-separated value; quarantined only when asked" do
+      item = { id: "t1", subject: "Invoice 42", from: "Stripe <billing@stripe.com>", to: ["bot@acme.dev"], cc: [], bcc: [],
+               labels: [], message_count: 2, has_attachment: true, has_draft: false, read: true,
+               received_at: "2026-10-12T10:00:00.000Z", folder: "inbox" }
       query = { "folders" => "inbox,archive", "labels" => "l1,l2", "read" => "false", "include_quarantined" => "true",
                 "limit" => "20", "after" => "t0" }
-      stub_request(:get, "https://api.test/inboxes/i1/threads").with(query: query).to_return(list_ok)
-      Millionsend::Inboxes::Threads.list("i1", folders: %w[inbox archive], labels: %w[l1 l2], read: false,
-                                               include_quarantined: true, limit: 20, after: "t0")
+      stub_request(:get, "https://api.test/inboxes/i1/threads").with(query: query)
+                                                               .to_return(ok(JSON.generate({ object: "list", has_more: false, data: [item.merge(quarantined: 2)] })))
+      res = Millionsend::Inboxes::Threads.list("i1", folders: %w[inbox archive], labels: %w[l1 l2], read: false,
+                                                     include_quarantined: true, limit: 20, after: "t0")
       expect(WebMock).to have_requested(:get, "https://api.test/inboxes/i1/threads").with(query: query)
+      expect(res[:data][0][:quarantined]).to eq(2)
 
       search = { "query" => "\"invoice 42\" -spam", "from" => "stripe.com,ada", "to" => "bot@acme.dev",
                  "has_attachment" => "true", "start_date" => "2026-10-01", "end_date" => "2026-10-12", "folders" => "sent" }
-      item = { id: "t1", subject: "Invoice 42", from: "Stripe <billing@stripe.com>", to: ["bot@acme.dev"], cc: [], bcc: [],
-               labels: [], message_count: 2, has_attachment: true, has_draft: false, read: true,
-               received_at: "2026-10-12T10:00:00.000Z", folder: "inbox", matched_email_id: "m2",
-               highlights: { subject: ["**Invoice** 42"] } }
+      found = item.merge(matched_email_id: "m2", highlights: { subject: ["**Invoice** 42"] })
       stub_request(:get, "https://api.test/inboxes/i1/threads/search").with(query: search)
-                                                                      .to_return(ok(JSON.generate({ object: "list", has_more: false, data: [item] })))
+                                                                      .to_return(ok(JSON.generate({ object: "list", has_more: false, data: [found] })))
       res = Millionsend::Inboxes::Threads.search("i1", query: "\"invoice 42\" -spam", from: ["stripe.com", "ada"],
                                                        to: ["bot@acme.dev"], has_attachment: true, start_date: "2026-10-01",
                                                        end_date: "2026-10-12", folders: ["sent"])
       expect(res[:data][0][:highlights]).to eq({ subject: ["**Invoice** 42"] })
+      expect(res[:data][0]).not_to have_key(:quarantined)
     end
 
     it "Threads get/update/remove" do
@@ -1105,7 +1162,7 @@ RSpec.describe "resource wiring" do
         headers: { "Content-Type" => "application/json" }
       )
       expect { Millionsend::Inboxes::Drafts.send("i1", "d3") }
-        .to raise_error(Millionsend::Error) { |e| expect(e.name).to eq("approval_required") }
+        .to raise_error(Millionsend::ApprovalRequiredError) { |e| expect(e.name).to eq("approval_required") }
     end
   end
 

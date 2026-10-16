@@ -13,6 +13,12 @@ module Millionsend
       # `options: { idempotency_key: "k" }`. No keyword parameters are declared
       # on purpose — Ruby 3 keyword separation would otherwise reject the
       # bare-keyword call shape.
+      #
+      # from may be an inbox's address on the shared domain while that domain's
+      # Domains.list row has sending_mode "open": the inbox's exact
+      # email_address (no +tag), no display name or its from_name, no
+      # reply_to, attachments, headers or scheduled_at, and at most 10 distinct
+      # recipients across to, cc and bcc.
       def send(params = {}, options = {})
         Millionsend::Request.new(
           method: :post, path: "/emails", body: params, **Millionsend::Util.request_options(options)

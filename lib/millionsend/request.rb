@@ -113,7 +113,10 @@ module Millionsend
     def handle(response)
       status = response.code.to_i
       body = parse(response.body)
-      raise Millionsend::Error.from_response(status, body) unless (200..299).cover?(status)
+      unless (200..299).cover?(status)
+        retry_after = Integer(response["retry-after"], 10, exception: false)
+        raise Millionsend::Error.from_response(status, body, retry_after)
+      end
 
       [status, body]
     end

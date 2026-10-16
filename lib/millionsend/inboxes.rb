@@ -7,9 +7,13 @@ module Millionsend
   # (folders:, labels:, from:...) send them comma-separated.
   module Inboxes
     class << self
-      # POST /inboxes — every field optional: email_address (omitted, a random
-      # address on the shared domain), name, from_name, forwarding, kind
-      # ("agent", the default, or "human"), expires_in ("24h", "7d"...; nil
+      # POST /inboxes — every field optional. The address is email_address on
+      # one of your domains, or else one on the shared domain (no DNS) named
+      # by username (random when omitted). domain_id, the id of a Domains.list
+      # row, stands in for email_address: the shared row works like leaving it
+      # out, and one of your own domains needs username, the part before the
+      # @. Also name (1-320 characters), from_name, forwarding, kind ("agent",
+      # the default, or "human"), expires_in ("1h" to "365d"; omitted or nil
       # never expires) and safety (any subset of the rules). Returns the inbox.
       def create(params = {})
         Millionsend::Request.new(method: :post, path: "/inboxes", body: params).perform
@@ -25,8 +29,8 @@ module Millionsend
         Millionsend::Request.new(method: :get, path: member_path(id_or_email)).perform
       end
 
-      # PATCH /inboxes/:id — name, from_name ("" removes it), expires_in (nil
-      # never expires). Returns the inbox.
+      # PATCH /inboxes/:id — name (1-320 characters), from_name ("" removes
+      # it), expires_in (nil never expires). Returns the inbox.
       def update(id, params)
         Millionsend::Request.new(method: :patch, path: member_path(id), body: params).perform
       end
@@ -65,9 +69,11 @@ module Millionsend
     module Codes
       class << self
         # GET /inboxes/:id/codes/latest — from: (an address, or a domain
-        # covering its subdomains), wait: (0-50 s), max_age: (60-86400 s,
-        # default 600). Always 200; status is "found", "none", "ambiguous" or
-        # "timeout".
+        # covering its subdomains), wait: (0-50 s), max_age: (60-86400 s since
+        # delivery, default 600), since: (an ISO 8601 time with an offset or
+        # Z; only mail received after it counts, so passing the previous
+        # code's received_at makes a second sign-in wait for its own code).
+        # Always 200; status is "found", "none", "ambiguous" or "timeout".
         def latest(inbox_id, options = {})
           Millionsend::Request.new(
             method: :get, path: "#{Inboxes.member_path(inbox_id)}/codes/latest",
@@ -133,8 +139,9 @@ module Millionsend
     module Threads
       class << self
         # GET /inboxes/:id/threads — folders: (["inbox"] by default), labels:,
-        # read:, include_quarantined:, limit:/after:/before:. Most recently
-        # active first.
+        # read:, include_quarantined: (items then carry quarantined:, the
+        # count of held messages; full-access team keys),
+        # limit:/after:/before:. Most recently active first.
         def list(inbox_id, options = {})
           Millionsend::Request.new(
             method: :get, path: "#{Inboxes.member_path(inbox_id)}/threads", query: Millionsend::Util.csv_query(options)

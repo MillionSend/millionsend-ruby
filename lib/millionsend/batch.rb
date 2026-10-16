@@ -8,7 +8,9 @@ module Millionsend
       # idempotency_key and batch_validation ("strict", the default, rejects the
       # whole batch on one invalid item; "permissive" sends the valid subset and
       # lists the rest under errors[]) — either flat or under options:, like
-      # Emails.send.
+      # Emails.send. An item from a shared-domain address is refused
+      # (inbox_send_policy): the whole batch in strict mode, that item in
+      # permissive mode.
       def send(list, options = {})
         Millionsend::Request.new(
           method: :post, path: "/emails/batch", body: list, **Millionsend::Util.request_options(options)

@@ -26,7 +26,7 @@ require "millionsend/inboxes"
 #
 #   Millionsend.api_key  = "ms_..."
 #   Millionsend.base_url = "https://mail.acme.dev"
-#   Millionsend::Emails.send(from: "onboarding@acme.dev", to: "you@example.com",
+#   Millionsend::Emails.send(from: "onboarding@acme.dev", to: "success@simulator.amazonses.com",
 #                            subject: "Hi", html: "<strong>it works</strong>")
 #
 # api_key falls back to the MILLIONSEND_API_KEY env var; base_url to
