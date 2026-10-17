@@ -211,7 +211,7 @@ Millionsend::Inboxes::Codes.latest(inbox[:id], from: "github.com", wait: 30, sin
 
 # Quarantine: held mail is kept and listed; agents see it only once a person releases it
 Millionsend::Inboxes::Quarantine.list(inbox[:id])
-Millionsend::Inboxes::Quarantine.release(inbox[:id], email_id, trust_sender: true) # also allowlists the sender
+Millionsend::Inboxes::Quarantine.release(inbox[:id], email_id)
 
 # Threads and their messages
 Millionsend::Inboxes::Threads.list(inbox[:id], folders: ["inbox", "archive"], read: false)
@@ -250,6 +250,13 @@ comma-separated value. With `include_quarantined: true` (full-access team keys),
 and `search` items carry `quarantined:`, the count of held messages. Inbox names take 1–320
 characters. Resend's hosted agent settings (`/inboxes/:id/agent`) are not exposed: MillionSend
 runs no agent.
+
+On an agent inbox with `screening` on, mail held before screening ran (`not_allowlisted`,
+`unauthenticated_sender`, `failed_auth`) is screened at release when screening can run: if it
+finds prompt injection or phishing, the email stays held as `injection` or `phishing`
+(`held_by_screening`, 409). `trust_sender: true` also adds the sender to the allowlist, only for
+mail held as `not_allowlisted` from a sender that authenticated (`sender_trust` `"external"`);
+anything else is refused with `trust_not_allowed` (403).
 
 #### The shared domain
 
@@ -579,6 +586,10 @@ An `Emails.send` that the suppression list alone refuses still keeps a metadata-
 email, which fires `email.suppressed`, and each retry keeps another, even with the same
 `idempotency_key` (a refused send doesn't hold its key).
 
+`Inboxes::Quarantine.release` raises `ApplicationError` for `trust_not_allowed` (403) and
+`held_by_screening` (409), see [Inboxes](#inboxes-beta); it answers `forbidden` (403) and
+`screening_unavailable` (503) only to MCP tokens.
+
 ### Retries
 
 The SDK never retries. `e.retry_after` is the response's `retry-after` header in seconds (`nil`
@@ -608,6 +619,7 @@ On a self-hosted instance, each feature needs at least this MillionSend version:
 | v0.13.0 | Newest-first lists; `since` on `Codes.latest`; `quarantined` on thread items; inbox names up to 320 characters; `NotFoundError` at once for an unknown `inbox_id`; `unread` on inbox-scoped keys; JSON 404 for unknown routes |
 | v0.14.0 | The shared row in `Domains.list` (`shared`, `sending_mode`, `sending_mode_reason`); `domain_id` on `Inboxes.create`; `subject` up to 998 characters |
 | v0.15.1 | The `email.scheduled`, `email.failed` and `email.suppressed` webhook events; `source_id` on `suppression.added` and `suppression.removed`; a `suppressed` email kept on `AllRecipientsSuppressedError` |
+| v0.16.0 | Release rules: `trust_sender` only for a `not_allowlisted` hold from an authenticated sender (`trust_not_allowed`); screening at release (`held_by_screening`) |
 
 An older server ignores options it doesn't know: before v0.14.0 `domain_id` (check the created
 inbox's `email_address`), before v0.13.0 `since` (a code already used can come back), and before
