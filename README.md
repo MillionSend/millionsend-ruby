@@ -460,17 +460,17 @@ as `previous_secret_expires_at` (`nil` when none is open).
 
 Events: `email.scheduled`, `email.sent`, `email.delivered`, `email.delivery_delayed`,
 `email.bounced`, `email.complained`, `email.failed`, `email.suppressed`, `email.opened`,
-`email.clicked`, `contact.created`, `contact.updated`,
+`email.clicked`, `email.prefetched`, `email.received`, `contact.created`, `contact.updated`,
 `contact.deleted`, `contact.unsubscribed`, `contact.resubscribed`, `contact.topic_opt_in`,
 `contact.topic_opt_out`, `suppression.added`, `suppression.removed`, `deliverability.warning`,
-`deliverability.paused`, `quota.warning`, `quota.reached`, `quota.paused`, `email.received`, and
+`deliverability.paused`, `quota.warning`, `quota.reached`, `quota.paused`, and
 the inbox events `inbox.created`, `inbox.updated`, `inbox.deleted`, `inbox.expired`,
 `inbox.thread.created`, `inbox.thread.folder.updated`, `inbox.thread.labels.updated`,
 `inbox.email.received`, `inbox.email.sent`, `inbox.email.quarantined`, `inbox.draft.created`,
-`inbox.draft.updated`, `inbox.draft.sent`, `inbox.draft.deleted`. Inbox events are opt-in: an
-endpoint gets them only when its `events` list names them. A shared-domain inbox deleted after
-90 unused days sends `inbox.expired`, then `inbox.deleted`, and inbox events from a send in the
-dashboard carry `source: "dashboard"` in their `data`.
+`inbox.draft.updated`, `inbox.draft.sent`, `inbox.draft.deleted`. `email.prefetched` and inbox
+events are opt-in: an endpoint gets them only when its `events` list names them. A shared-domain
+inbox deleted after 90 unused days sends `inbox.expired`, then `inbox.deleted`, and inbox events
+from a send in the dashboard carry `source: "dashboard"` in their `data`.
 
 `email.failed` says why in `data.failed.reason`, and `email.suppressed` in `data.suppressed`
 (`type`, `message` and `reason`); those values are an open set, so treat them as strings, not a
@@ -575,6 +575,9 @@ before v0.13.0 answered it with text, which raises `ApplicationError` with statu
 
 `Emails.send` and `Batch.send` raise `AllRecipientsSuppressedError` (`all_recipients_suppressed`,
 422) when every `to` recipient is on the suppression list or opted out of the send's `topic_id`.
+An `Emails.send` that the suppression list alone refuses still keeps a metadata-only `suppressed`
+email, which fires `email.suppressed`, and each retry keeps another, even with the same
+`idempotency_key` (a refused send doesn't hold its key).
 
 ### Retries
 
@@ -604,7 +607,7 @@ On a self-hosted instance, each feature needs at least this MillionSend version:
 | v0.12.0 | `username`; inboxes that never expire by default; sends from shared-domain inboxes; name review (`NameReviewUnavailableError`, the daily budget); `statusCode`/`name` on contacts-batch errors |
 | v0.13.0 | Newest-first lists; `since` on `Codes.latest`; `quarantined` on thread items; inbox names up to 320 characters; `NotFoundError` at once for an unknown `inbox_id`; `unread` on inbox-scoped keys; JSON 404 for unknown routes |
 | v0.14.0 | The shared row in `Domains.list` (`shared`, `sending_mode`, `sending_mode_reason`); `domain_id` on `Inboxes.create`; `subject` up to 998 characters |
-| v0.15.1 | The `email.scheduled`, `email.failed` and `email.suppressed` webhook events; `source_id` on `suppression.added` and `suppression.removed` |
+| v0.15.1 | The `email.scheduled`, `email.failed` and `email.suppressed` webhook events; `source_id` on `suppression.added` and `suppression.removed`; a `suppressed` email kept on `AllRecipientsSuppressedError` |
 
 An older server ignores options it doesn't know: before v0.14.0 `domain_id` (check the created
 inbox's `email_address`), before v0.13.0 `since` (a code already used can come back), and before
