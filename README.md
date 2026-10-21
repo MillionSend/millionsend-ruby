@@ -349,15 +349,32 @@ Emails are unique per team (case-insensitive) — a duplicate `create` raises
 
 ### Contact properties
 
-Typed custom fields for contacts. `key` and `type` are fixed at creation.
+Typed custom fields for contacts. `key` and `type` are fixed at creation. `type` is `"string"`,
+`"number"` or `"date"`; `"date"` is a MillionSend extension.
 
 ```ruby
 prop = Millionsend::ContactProperties.create(key: "plan", type: "string", fallback_value: "free")
+Millionsend::ContactProperties.create(key: "last_login", type: "date")
 Millionsend::ContactProperties.get(prop[:id])
 Millionsend::ContactProperties.list(limit: 50)
 Millionsend::ContactProperties.update(prop[:id], fallback_value: nil) # nil clears
 Millionsend::ContactProperties.remove(prop[:id])
 ```
+
+A date property's values, and its `fallback_value`, must read as a date, or the write raises
+`ValidationError` (422):
+
+- an ISO 8601 date, `"2026-01-08"`, read as midnight UTC;
+- a date-time with `T` or a space, such as `"2026-01-08T10:30:00Z"` or `"2026-01-08 10:30"`, with
+  optional seconds, up to 9 fraction digits and an optional zone (`Z`, `±HH`, `±HHMM` or
+  `±HH:MM`), read as UTC when it names no zone;
+- Unix time in seconds or milliseconds from 2000-01-01 to 2100-01-01, such as `1767225600`, a
+  fraction allowed.
+
+Send a `Time` as `time.to_i` or `time.iso8601` (which needs `require "time"` before Ruby 3.4):
+the SDK writes a bare `Time` as `"2026-01-08 10:30:00 -0300"`, with a space before the zone,
+which doesn't read as a date.
+`Contacts.get` returns a date as the stored text, a `String`: `{ type: "date", value: "2026-01-08" }`.
 
 ### Topics
 
@@ -523,6 +540,10 @@ segment = Millionsend::Segments.create(
   name: "Pro plan",
   filter: { match: "all", conditions: [{ field: "property:plan", op: "equals", value: "pro" }] }
 )
+Millionsend::Segments.create(
+  name: "Lapsed",
+  filter: { match: "all", conditions: [{ field: "property:last_login", op: "not_in_last_days", value: "90" }] }
+)
 Millionsend::Segments.get(segment[:id]) # includes a live contact_count
 Millionsend::Segments.list
 Millionsend::Segments.contacts(segment[:id], limit: 50) # the contacts currently matching
@@ -530,6 +551,11 @@ Millionsend::Segments.contacts(segment[:id], include: ["properties", "topics"]) 
 Millionsend::Segments.update(segment[:id], name: "Pro tier")
 Millionsend::Segments.remove(segment[:id])
 ```
+
+`created_at` and `property:<key>` take four date ops: `before` and `after` with an ISO 8601 date
+or date-time, and `in_last_days` (from N days ago to now) and `not_in_last_days` (more than N
+days ago) with N as a string, a whole number from `"1"` to `"36500"`. Any property takes them,
+whatever its type; a value that doesn't read as a [date](#contact-properties) matches none.
 
 ### Usage (MillionSend extension)
 
@@ -620,6 +646,7 @@ On a self-hosted instance, each feature needs at least this MillionSend version:
 | v0.14.0 | The shared row in `Domains.list` (`shared`, `sending_mode`, `sending_mode_reason`); `domain_id` on `Inboxes.create`; `subject` up to 998 characters |
 | v0.15.1 | The `email.scheduled`, `email.failed` and `email.suppressed` webhook events; `source_id` on `suppression.added` and `suppression.removed`; a `suppressed` email kept on `AllRecipientsSuppressedError` |
 | v0.16.0 | Release rules: `trust_sender` only for a `not_allowlisted` hold from an authenticated sender (`trust_not_allowed`); screening at release (`held_by_screening`) |
+| v0.22.0 | The `"date"` contact property type; the `before`, `after`, `in_last_days` and `not_in_last_days` segment filter ops |
 
 An older server ignores options it doesn't know: before v0.14.0 `domain_id` (check the created
 inbox's `email_address`), before v0.13.0 `since` (a code already used can come back), and before

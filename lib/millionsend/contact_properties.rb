@@ -5,7 +5,11 @@ module Millionsend
   # only fallback_value can change.
   module ContactProperties
     class << self
-      # POST /contact-properties — key, type ("string"/"number"), fallback_value.
+      # POST /contact-properties — key, type ("string"/"number"/"date"),
+      # fallback_value. "date" is a MillionSend extension: its values and its
+      # fallback_value must read as an ISO 8601 date (midnight UTC), a
+      # date-time (UTC when it names no zone) or Unix seconds or milliseconds
+      # from 2000 to 2100, else 422.
       def create(params)
         Millionsend::Request.new(method: :post, path: "/contact-properties", body: params).perform
       end
