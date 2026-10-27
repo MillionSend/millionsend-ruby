@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # setup-ruby has no Ruby 3.0 or 3.1 builds for ubuntu-26.04, and the gem
+    # still supports both (required_ruby_version >= 3.0).
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
